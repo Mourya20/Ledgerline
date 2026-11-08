@@ -11,9 +11,9 @@ Phase 1 establishes the PostgreSQL schema, JPA domain model, normal-balance acco
 ```
 ┌───────────────────────────────────────────────────────────┐
 │               Spring Boot 4.1.2 Backend                  │
-│  - REST Controllers (Auth, Audit, Admin)                  │
+│  - REST Controllers (Auth, Audit)                         │
 │  - Spring Security (Sessions, CSRF, RBAC)                │
-│  - Login Rate Limiter (Sliding Window, Bounded Cache)     │
+│  - Login Rate Limiter (Atomic Reservation, Sliding Window)│
 │  - Audit Event Dispatcher (Sanitized Metadata)           │
 │  - Spring Data JPA / Hibernate (ddl-auto=validate)        │
 └─────────────────────────────┬─────────────────────────────┘
@@ -22,10 +22,13 @@ Phase 1 establishes the PostgreSQL schema, JPA domain model, normal-balance acco
                               │
 ┌─────────────────────────────▼─────────────────────────────┐
 │                 PostgreSQL 18 Database                   │
-│  - Flyway Migrations (V1 — V5)                           │
+│  - Flyway Migrations (V1 — V6)                           │
 │  - Normal Balance Modeling (DEBIT / CREDIT)               │
+│  - Account Ownership & Classification Invariants         │
 │  - Row-Level Locking (`FOR UPDATE` on accounts)          │
 │  - Trigger-Maintained Balance Projections                 │
+│  - Call-Stack Balance Protection (PG_CONTEXT)             │
+│  - Least-Privilege App Role (`ledgerline_runtime`)       │
 │  - Append-Only Ledger Entries (UPDATE/DELETE Forbidden)   │
 │  - Append-Only Audit Logs (UPDATE/DELETE Forbidden)       │
 │  - Deferred Commit Invariant Triggers (Zero-Sum Debits=Credits) │
@@ -34,13 +37,14 @@ Phase 1 establishes the PostgreSQL schema, JPA domain model, normal-balance acco
 ```
 
 ### Core Accounting Principles
-1. **Ledger Primacy**: Ledger entries are the authoritative, immutable source of financial truth. The `accounts.balance` column is an optimized projection maintained automatically by database triggers.
+1. **Ledger Primacy**: Ledger entries are the authoritative, immutable source of financial truth. The `accounts.balance` column is an optimized projection maintained automatically by database triggers. Direct modification of `balance` is strictly forbidden and blocked both by role privileges and call-stack trigger guards.
 2. **Normal Balance Classification**: Accounts explicitly specify their normal balance (`normal_balance` column):
    - **Customer Liability Accounts (`CREDIT` normal)**: `Balance = Total Credits - Total Debits`
    - **Bank Asset / Vault Accounts (`DEBIT` normal)**: `Balance = Total Debits - Total Credits`
-3. **Transaction Invariants**: Any transaction containing ledger entries must finish as `COMPLETED` at commit time, contain at least one debit and one credit, have equal total debits and credits, and maintain strict currency consistency across all entries and accounts.
-4. **Pessimistic Concurrency**: Balance projection updates execute `SELECT ... FOR UPDATE` row locks on the affected accounts to prevent race conditions and concurrent double-spending.
-5. **JPA Entity Synchronization**: Services reload trigger-updated entity balances using `AccountRepository.refresh(account)` within active transactions to avoid reading stale in-memory balances.
+3. **Transaction Invariants**: Any transaction containing ledger entries must finish as `COMPLETED` at commit time, contain at least one debit and one credit, have equal total debits and credits, and maintain strict currency consistency across all entries and accounts. Allowed transaction statuses are strictly `PENDING`, `COMPLETED`, and `FAILED`.
+4. **Account Ownership Rules**: Every `CUSTOMER` account must have an associated owner user (`owner_user_id IS NOT NULL`). Every `SYSTEM` account must have no owner user (`owner_user_id IS NULL`). Account classification (`account_type`, `normal_balance`, `currency`) is permanently immutable once ledger entries are recorded.
+5. **Pessimistic Concurrency**: Balance projection updates execute `SELECT ... FOR UPDATE` row locks on the affected accounts to prevent race conditions and concurrent double-spending.
+6. **JPA Entity Synchronization**: Services reload trigger-updated entity balances using `entityManager.refresh(account)` within active transactions to avoid reading stale in-memory balances.
 
 ---
 
@@ -67,7 +71,8 @@ docker compose up -d
 ```
 
 - **Host Port**: `5432`
-- **Application Role**: `ledgerline_app`
+- **Migration Role**: `ledgerline_app` (schema owner for Flyway migrations)
+- **Runtime Application Role**: `ledgerline_runtime` (least-privilege role for backend queries)
 - **Database**: `ledgerline_db`
 - **Data Volume**: `ledgerline_data` (Do not delete or run `docker compose down -v`)
 
@@ -83,7 +88,7 @@ docker exec ledgerline-postgres psql -U ledgerline_app -d postgres -c "CREATE DA
 
 ---
 
-## 4. Database Migrations (V1 — V5)
+## 4. Database Migrations (V1 — V6)
 
 Flyway manages all schema changes sequentially. Existing migrations are strictly immutable:
 
@@ -97,6 +102,13 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
   - Rewrites `apply_ledger_entry_to_balance()` with `FOR UPDATE` row locking and normal-balance calculation rules.
   - Rewrites `validate_ledger_entry()` to forbid `UPDATE` and `DELETE` on `ledger_entries` (strictly append-only), forbid adding entries to completed transactions, and ensure currency matching.
   - Adds deferred commit constraint triggers (`ledger_transactions_integrity_at_commit` and `ledger_entries_transaction_integrity_at_commit`) calling `check_transaction_integrity_by_id()` (`INITIALLY DEFERRED`) to validate zero-sum balance and transaction status at commit.
+- **`V6__account_ownership_immutability_and_privileges.sql`**:
+  - Enforces account ownership check constraint: `CUSTOMER` accounts must have an owner (`owner_user_id IS NOT NULL`); `SYSTEM` accounts must not (`owner_user_id IS NULL`).
+  - Restricts transaction statuses strictly to `PENDING`, `COMPLETED`, `FAILED` (eliminating `REVERSED`).
+  - Reconciles account balance projections and asserts that accounts with zero ledger entries must possess zero balance.
+  - Trigger `protect_account_classification()`: freezes `account_type`, `normal_balance`, and `currency` as permanently immutable once ledger entries exist for the account.
+  - Trigger `protect_account_balance_projection()`: inspects `PG_CONTEXT` call-stack diagnostics to forbid direct SQL balance mutations outside `apply_ledger_entry_to_balance()`.
+  - Provisions least-privilege runtime role `ledgerline_runtime`: grants table DML without `UPDATE (balance)` on `accounts` and revokes `UPDATE`/`DELETE` on `ledger_entries` and `audit_logs`.
 
 ---
 
@@ -106,12 +118,13 @@ LedgerLine implements a comprehensive defense-in-depth security model:
 
 1. **BCrypt 72-Byte Truncation Defense**: BCrypt silently discards password bytes beyond 72 bytes. LedgerLine enforces `@MaxUtf8Bytes(max = 72)` on registration and login DTOs, rejecting oversized inputs with HTTP 400 before they reach the hashing algorithm.
 2. **Session Fixation Protection**: Spring Security's `SessionFixationProtectionStrategy` is explicitly invoked upon login, invalidating the pre-auth session and issuing a newly generated session ID.
-3. **Login Rate Limiting**: An in-memory sliding window rate limiter (`LoginRateLimiter`) throttles login attempts per IP address and per email address (5 attempts/min), mitigating brute-force and credential stuffing attacks (HTTP 429).
+3. **Atomic Concurrency-Safe Rate Limiting**: An in-memory sliding window rate limiter (`LoginRateLimiter`) with atomic reservation throttles login attempts per IP address and per email address (5 attempts/min). Features bounded capacity (10,000 keys) with eviction, `Retry-After` headers on HTTP 429, and shared IP counter preservation upon successful authentication.
 4. **Disabled User Session Revocation**: Inactive or suspended accounts (`enabled = false`) are rejected at authentication and during active sessions.
 5. **CSRF Protection**: Enabled with `CookieCsrfTokenRepository(CookieHttpOnly = false)` and `CsrfTokenRequestAttributeHandler`. Requires `X-XSRF-TOKEN` for mutating HTTP requests.
 6. **Hardened Cookies**: Session cookies are configured with `HttpOnly=true` and `SameSite=lax` (or `None` with `Secure=true` in production).
 7. **Append-Only Immutability**: PostgreSQL triggers prevent modifying or deleting rows in `ledger_entries` and `audit_logs`.
-8. **Sanitized Audit Trail**: `AuditService` records authentication lifecycle events (`AUTH_REGISTER_SUCCESS`, `AUTH_LOGIN_SUCCESS`, `AUTH_LOGIN_FAILURE`, `AUTH_LOGOUT`, `AUTH_DISABLED_USER_ATTEMPT`, `AUTH_RATE_LIMIT_EXCEEDED`) without ever storing passwords, session tokens, or raw credentials in metadata.
+8. **Protected Audit Trail & DTO Isolation**: `AuditController` serves paginated `AuditLogResponse` projections (`GET /api/v1/audit/logs`), completely isolating domain entities and never exposing password hashes or sensitive internal fields. Audit details are persisted and validated as native JSON objects.
+9. **Least-Privilege Database Role Separation**: Migrations execute under schema owner `ledgerline_app`, while the runtime backend operates under `ledgerline_runtime` without balance mutation privileges.
 
 For a complete threat analysis, see [THREATS.md](THREATS.md).
 
@@ -127,8 +140,6 @@ For a complete threat analysis, see [THREATS.md](THREATS.md).
 | `/api/v1/auth/me` | `GET` | Denied (401) | Allowed | Allowed | Allowed |
 | `/api/v1/auth/logout` | `POST` | Denied (401) | Allowed | Allowed | Allowed |
 | `/api/v1/audit/logs` | `GET` | Denied (401) | Denied (403) | **Allowed (Read-Only)** | Allowed |
-| `/api/v1/audit/logs` | `POST` | Denied (401) | Denied (403) | **Denied (403)** | Allowed |
-| `/api/v1/admin/**` | `GET` / `POST` | Denied (401) | Denied (403) | **Denied (403)** | Allowed |
 | `/actuator/health` | `GET` | Permitted | Permitted | Permitted | Permitted |
 
 *Registration always creates `CUSTOMER` accounts. Elevated roles (`ADMIN`, `AUDITOR`) cannot be requested through public endpoints.*
@@ -164,7 +175,7 @@ Or run the full verification lifecycle:
 ```
 
 ### Test Suite Coverage
-- **`Phase1IntegrationTests`**: 26 integration tests covering:
+- **`Phase1IntegrationTests`**: 31 integration tests covering:
   - Deposit, withdrawal, and transfer normal-balance mathematics
   - Customer non-negative balance rejection
   - Transaction rollback on failure
@@ -180,9 +191,16 @@ Or run the full verification lifecycle:
   - Logout session invalidation and audit logging
   - Role-based authorization and AUDITOR read-only enforcement
   - BCrypt 72-byte UTF-8 password limit validation
-  - Login rate limiting (sliding window HTTP 429)
+  - Login rate limiting (sliding window HTTP 429 and Retry-After)
   - Authentication audit log recording and sanitization
-- **`LoginRateLimiterTest`**: 5 unit tests for IP/email rate limiting sliding windows and eviction.
+  - Audit log pagination and `AuditLogResponse` field isolation (no password hash)
+  - Audit log JSONB object type verification (`jsonb_typeof(details) = 'object'`)
+  - Account ownership policy enforcement at DB and entity levels
+  - Account classification immutability (`account_type`, `normal_balance`, `currency`) once entries exist
+  - Runtime database role privilege boundaries (`ledgerline_runtime` cannot mutate balances directly)
+  - Call-stack protection (`PG_CONTEXT`) preventing direct SQL balance modifications
+  - Strict transaction status restrictions (`PENDING`, `COMPLETED`, `FAILED`)
+- **`LoginRateLimiterTest`**: 5 unit tests for IP/email rate limiting, atomic reservation, independent sliding windows, shared IP preservation, and eviction.
 - **`MaxUtf8BytesValidatorTest`**: 4 unit tests for UTF-8 multi-byte boundary validation.
 - **`LedgerlineApplicationTests`**: Spring application context loading and health endpoint check.
 
@@ -191,17 +209,20 @@ Or run the full verification lifecycle:
 ## 9. Implementation Status
 
 ### Implemented in Phase 1
-- [x] Immutable PostgreSQL schema with Flyway migrations (V1—V5).
+- [x] Immutable PostgreSQL schema with Flyway migrations (V1—V6).
 - [x] Normal balance classification (`DEBIT` vs. `CREDIT`) and trigger-based projection.
+- [x] Account ownership constraints (`CUSTOMER` must have owner; `SYSTEM` must have NULL owner).
+- [x] Account classification immutability once ledger entries exist.
 - [x] Concurrency-safe row-locking (`FOR UPDATE`) on balance mutations.
+- [x] Call-stack balance protection (`PG_CONTEXT`) and least-privilege DB role (`ledgerline_runtime`).
 - [x] Deferred commit constraint triggers enforcing zero-sum balanced transactions.
 - [x] Append-only database protection for ledger entries and audit logs.
 - [x] Database-backed session authentication with BCrypt hashing.
 - [x] Max 72 UTF-8 byte password validation.
 - [x] Session fixation protection with session ID rotation.
-- [x] Sliding-window login rate limiting with HTTP 429 responses.
-- [x] Fine-grained RBAC with explicit read-only access for `AUDITOR`.
-- [x] Security audit event logging with credential sanitization.
+- [x] Concurrency-safe sliding-window login rate limiting with HTTP 429 and `Retry-After`.
+- [x] Fine-grained RBAC with explicit read-only access for `AUDITOR` and isolated DTO responses.
+- [x] Paginated audit trail with sanitized JSONB metadata.
 - [x] Isolated test database configuration (`ledgerline_test_db`) and runtime safety guard (`TestDatabaseGuard`).
 - [x] Formal engineering threat model ([THREATS.md](THREATS.md)).
 

@@ -160,3 +160,61 @@ Perform a complete remediation of Phase 1 based on an independent senior-develop
 - Accounting remediation: `9e47971` (https://github.com/Mourya20/Vaultora-Banking-System/commit/9e47971)
 - Security & audit hardening: `725cad4` (https://github.com/Mourya20/Vaultora-Banking-System/commit/725cad4)
 - Test isolation & test suite: `af0c689` (https://github.com/Mourya20/Vaultora-Banking-System/commit/af0c689)
+
+---
+
+## 6. 2026-11-08 - Senior Developer Audit Remediation, Package Simplification, & Database Security Architecture
+
+### Prompt & Context
+Execute comprehensive Phase 1 code cleanup, security hardening, and architectural remediation based on senior-developer audit findings:
+1. Simplify duplicated Java package structure (`com.ledgerline.ledgerline` to `com.ledgerline`).
+2. Prevent password hash exposure through audit APIs; introduce paginated `AuditLogResponse` DTO and remove fake endpoints (`POST /api/v1/audit/logs`, `AdminController`).
+3. Correct audit JSONB mapping to store structured JSON objects validated via `jsonb_typeof(details) = 'object'`.
+4. Enforce account ownership constraints at DB level: `CUSTOMER` accounts must have an owner; `SYSTEM` accounts must have NULL owner.
+5. Correct balance projection reconciliation migration, rejecting non-zero balances lacking ledger entries.
+6. Remove unsafe session-variable balance authorization (`ledgerline.balance_update`); introduce least-privilege runtime role `ledgerline_runtime` and call-stack introspection (`PG_CONTEXT`) trigger guards.
+7. Protect account classification (`account_type`, `normal_balance`, `currency`) once ledger entries exist.
+8. Make login rate limiting concurrency-safe with atomic attempt reservation, `Retry-After` response headers, and shared IP counter preservation.
+9. Remove redundant repository abstractions (`AccountRepositoryCustom`/`AccountRepositoryCustomImpl`) and redundant `flyway-core` dependencies.
+10. Remove misleading `REVERSED` transaction status (strictly `PENDING`, `COMPLETED`, `FAILED`).
+
+### Implementation & Remediation
+- **Package Restructuring**:
+  - Restructured all Java production and test classes from `com.ledgerline.ledgerline.*` to `com.ledgerline.*`.
+  - Removed obsolete nested directories and verified zero broken package references across the working tree.
+- **Audit Response DTO & Endpoint Cleanup**:
+  - Created `AuditLogResponse` record exposing strictly `id`, `actorUserId`, `action`, `resourceType`, `resourceId`, `details`, and `createdAt`.
+  - Updated `AuditController` to return `Page<AuditLogResponse>` with Spring Data `Pageable`.
+  - Removed fake non-functional `POST /api/v1/audit/logs` endpoint.
+  - Removed placeholder `AdminController`.
+  - Corrected `AuditLogEntity.details` to map directly as `Map<String, Object>` via `@JdbcTypeCode(SqlTypes.JSON)`.
+- **Database Schema Migration `V6` (`V6__account_ownership_immutability_and_privileges.sql`)**:
+  - Check constraint `accounts_ownership_policy_chk`: `(CUSTOMER AND owner_user_id IS NOT NULL) OR (SYSTEM AND owner_user_id IS NULL)`.
+  - Check constraint `ledger_transactions_status_chk`: strictly `PENDING`, `COMPLETED`, `FAILED` (eliminated `REVERSED`).
+  - Balance reconciliation block recalculating projections from entries and failing if non-zero balances exist with zero entries.
+  - Trigger `protect_account_classification()`: rejects updates to `account_type`, `normal_balance`, or `currency` if ledger entries exist.
+  - Trigger `protect_account_balance_projection()`: inspects `GET DIAGNOSTICS v_context = PG_CONTEXT` to reject any balance update outside `apply_ledger_entry_to_balance`.
+  - Created least-privilege role `ledgerline_runtime` lacking `UPDATE (balance)` on `accounts` and lacking `UPDATE`/`DELETE` on `ledger_entries` and `audit_logs`.
+- **Domain & Application Logic**:
+  - Added `@PrePersist` and `@PreUpdate` ownership checks to `AccountEntity`.
+  - Removed `REVERSED` from `TransactionStatus`.
+  - Removed `AccountRepositoryCustom` and `AccountRepositoryCustomImpl`; updated persistence context usage to call `entityManager.refresh()` directly.
+  - Removed explicit redundant `flyway-core` dependency from `pom.xml`.
+- **Rate Limiting Hardening**:
+  - Enhanced `LoginRateLimiter`: atomic attempt reservation (`tryReserve` inside synchronized `compute`), atomic rollback on partial failure, bounded capacity (10,000 keys) with LRU eviction, string bounds truncation (IP 64 chars, email 255 chars).
+  - Preserved shared IP counter upon successful authentication while clearing only the user email counter.
+  - Added `retryAfterSeconds` to `RateLimitExceededException` and populated HTTP `Retry-After` header in `ApiExceptionHandler`.
+- **Configuration**:
+  - Configured `application.properties` and `application-test.properties` with separate Flyway migration owner (`ledgerline_app`) and runtime connection (`ledgerline_runtime`).
+
+### Verification
+- Executed `.\mvnw.cmd test` and `.\mvnw.cmd clean verify`.
+- 41 total tests executed, 0 failures, 0 errors, 0 skipped:
+  - 31 integration tests in `Phase1IntegrationTests`
+  - 5 rate limiter unit tests in `LoginRateLimiterTest`
+  - 4 UTF-8 byte validator unit tests in `MaxUtf8BytesValidatorTest`
+  - 1 application context test in `LedgerlineApplicationTests`
+- Clean JAR packaging succeeded.
+
+### Commit References
+- Package restructuring: `fc7418f` (`refactor: simplify duplicated Java package structure`)
