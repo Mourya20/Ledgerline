@@ -67,6 +67,15 @@ class Phase1IntegrationTests {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").value("CUSTOMER"));
 
+            String auditorAttemptEmail = uniqueEmail();
+            mockMvc.perform(post("/api/v1/auth/register")
+                .with(csrf())
+                .contentType("application/json")
+                .content("{\"email\":\"" + auditorAttemptEmail
+                    + "\",\"password\":\"CorrectHorseBattery19\",\"role\":\"AUDITOR\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.role").value("CUSTOMER"));
+
         UserEntity user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
         org.junit.jupiter.api.Assertions.assertNotEquals("CorrectHorseBattery12", user.getPasswordHash());
         org.junit.jupiter.api.Assertions.assertTrue(passwordEncoder.matches("CorrectHorseBattery12", user.getPasswordHash()));
