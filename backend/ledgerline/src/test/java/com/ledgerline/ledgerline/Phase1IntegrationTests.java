@@ -13,6 +13,7 @@ import java.util.UUID;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,6 +46,15 @@ class Phase1IntegrationTests {
 
     @Autowired
     private TransactionTemplate transactionTemplate;
+
+    @AfterEach
+    void cleanTestData() {
+        jdbcTemplate.update("DELETE FROM ledger_entries WHERE transaction_id IN "
+                + "(SELECT id FROM ledger_transactions WHERE transaction_type = 'TEST')");
+        jdbcTemplate.update("DELETE FROM ledger_transactions WHERE transaction_type = 'TEST'");
+        jdbcTemplate.update("DELETE FROM accounts WHERE account_number LIKE 'SYS-%'");
+        jdbcTemplate.update("DELETE FROM users WHERE email LIKE 'phase1-%@example.com'");
+    }
 
     @Test
     void registrationAssignsCustomerAndHashesPassword() throws Exception {
@@ -132,14 +142,18 @@ class Phase1IntegrationTests {
 
     @Test
     void auditLogsRejectUpdateAndDelete() {
-        UUID auditId = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO audit_logs (id, action, details) VALUES (?, ?, '{}'::jsonb)", auditId,
+        assertThrows(RuntimeException.class, () -> transactionTemplate.executeWithoutResult(status -> {
+            UUID auditId = UUID.randomUUID();
+            jdbcTemplate.update("INSERT INTO audit_logs (id, action, details) VALUES (?, ?, '{}'::jsonb)", auditId,
                 "TEST");
-
-        assertThrows(RuntimeException.class, () -> transactionTemplate.executeWithoutResult(status -> jdbcTemplate
-                .update("UPDATE audit_logs SET action = ? WHERE id = ?", "CHANGED", auditId)));
-        assertThrows(RuntimeException.class, () -> transactionTemplate.executeWithoutResult(status -> jdbcTemplate
-                .update("DELETE FROM audit_logs WHERE id = ?", auditId)));
+            jdbcTemplate.update("UPDATE audit_logs SET action = ? WHERE id = ?", "CHANGED", auditId);
+        }));
+        assertThrows(RuntimeException.class, () -> transactionTemplate.executeWithoutResult(status -> {
+            UUID auditId = UUID.randomUUID();
+            jdbcTemplate.update("INSERT INTO audit_logs (id, action, details) VALUES (?, ?, '{}'::jsonb)", auditId,
+                "TEST");
+            jdbcTemplate.update("DELETE FROM audit_logs WHERE id = ?", auditId);
+        }));
     }
 
     @Test
