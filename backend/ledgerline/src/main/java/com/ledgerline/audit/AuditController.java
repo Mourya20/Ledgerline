@@ -1,16 +1,11 @@
 package com.ledgerline.audit;
 
-import java.util.List;
-import java.util.Map;
-
-import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.ledgerline.domain.AuditLogEntity;
 import com.ledgerline.repository.AuditLogRepository;
 
 @RestController
@@ -24,12 +19,8 @@ public class AuditController {
     }
 
     @GetMapping("/logs")
-    public List<AuditLogEntity> listLogs() {
-        return auditLogRepository.findAll();
-    }
-
-    @PostMapping("/logs")
-    public ResponseEntity<Map<String, String>> adminOnlyAuditAction(@RequestBody(required = false) Map<String, Object> body) {
-        return ResponseEntity.ok(Map.of("status", "admin-audit-action-recorded"));
+    public Page<AuditLogResponse> listLogs(Pageable pageable) {
+        return auditLogRepository.findAll(pageable)
+                .map(AuditLogResponse::fromEntity);
     }
 }

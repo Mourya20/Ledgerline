@@ -1,6 +1,8 @@
 package com.ledgerline.domain;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -37,7 +39,7 @@ public class AuditLogEntity {
 
     @Column(nullable = false, columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
-    private String details = "{}";
+    private Map<String, Object> details = new HashMap<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -45,13 +47,13 @@ public class AuditLogEntity {
     protected AuditLogEntity() {
     }
 
-    public AuditLogEntity(UserEntity actor, String action, String resourceType, UUID resourceId, String details) {
+    public AuditLogEntity(UserEntity actor, String action, String resourceType, UUID resourceId, Map<String, Object> details) {
         this.id = UUID.randomUUID();
         this.actor = actor;
         this.action = action;
         this.resourceType = resourceType;
         this.resourceId = resourceId;
-        this.details = details == null ? "{}" : details;
+        this.details = (details == null) ? new HashMap<>() : new HashMap<>(details);
     }
 
     @PrePersist
@@ -79,7 +81,7 @@ public class AuditLogEntity {
         return resourceId;
     }
 
-    public String getDetails() {
+    public Map<String, Object> getDetails() {
         return details;
     }
 

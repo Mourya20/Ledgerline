@@ -6,12 +6,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
 
 import com.ledgerline.domain.AuditLogEntity;
 import com.ledgerline.domain.UserEntity;
@@ -19,8 +16,6 @@ import com.ledgerline.repository.AuditLogRepository;
 
 @Service
 public class AuditService {
-
-    private static final Logger log = LoggerFactory.getLogger(AuditService.class);
 
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "password", "password_hash", "token", "secret", "session", "sessionid",
@@ -35,11 +30,9 @@ public class AuditService {
     public static final String ACTION_RATE_LIMIT_EXCEEDED = "AUTH_RATE_LIMIT_EXCEEDED";
 
     private final AuditLogRepository auditLogRepository;
-    private final ObjectMapper objectMapper;
 
-    public AuditService(AuditLogRepository auditLogRepository, ObjectMapper objectMapper) {
+    public AuditService(AuditLogRepository auditLogRepository) {
         this.auditLogRepository = auditLogRepository;
-        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -56,14 +49,14 @@ public class AuditService {
 
     private AuditLogEntity persistLog(UserEntity actor, String action, String resourceType, UUID resourceId,
             Map<String, ?> metadata) {
-        String detailsJson = sanitizeAndSerialize(metadata);
-        AuditLogEntity entity = new AuditLogEntity(actor, action, resourceType, resourceId, detailsJson);
+        Map<String, Object> sanitized = sanitizeMetadata(metadata);
+        AuditLogEntity entity = new AuditLogEntity(actor, action, resourceType, resourceId, sanitized);
         return auditLogRepository.save(entity);
     }
 
-    private String sanitizeAndSerialize(Map<String, ?> metadata) {
+    private Map<String, Object> sanitizeMetadata(Map<String, ?> metadata) {
         if (metadata == null || metadata.isEmpty()) {
-            return "{}";
+            return new HashMap<>();
         }
         Map<String, Object> sanitized = new HashMap<>();
         for (Map.Entry<String, ?> entry : metadata.entrySet()) {
@@ -72,11 +65,6 @@ public class AuditService {
                 sanitized.put(key, entry.getValue());
             }
         }
-        try {
-            return objectMapper.writeValueAsString(sanitized);
-        } catch (Exception e) {
-            log.error("Failed to serialize audit log details", e);
-            return "{}";
-        }
+        return sanitized;
     }
 }
