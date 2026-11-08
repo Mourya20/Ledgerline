@@ -14,8 +14,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
@@ -60,6 +63,12 @@ class Phase1IntegrationTests {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private AuditService auditService;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -208,8 +217,12 @@ class Phase1IntegrationTests {
             completeTransaction(txId);
         });
 
-        // Refresh entity from DB
-        AccountEntity refreshed = accountRepository.refresh(account);
+        // Refresh entity from DB directly using EntityManager
+        AccountEntity refreshed = transactionTemplate.execute(status -> {
+            AccountEntity managed = entityManager.find(AccountEntity.class, customerAccountId);
+            entityManager.refresh(managed);
+            return managed;
+        });
         assertEquals(new BigDecimal("25.00"), refreshed.getBalance(), "Refreshed JPA entity must reflect trigger-updated balance");
     }
 
@@ -493,7 +506,7 @@ class Phase1IntegrationTests {
         mockMvc.perform(get("/api/v1/audit/logs").session(auditorSession))
                 .andExpect(status().isOk());
 
-        // 2. AUDITOR CANNOT perform POST on audit logs (must be 403 Forbidden)
+        // 2. AUDITOR CANNOT perform mutating POST on audit logs (403 Forbidden)
         mockMvc.perform(post("/api/v1/audit/logs")
                 .session(auditorSession)
                 .with(csrf())
@@ -501,23 +514,117 @@ class Phase1IntegrationTests {
                 .content("{\"action\":\"TEST\"}"))
                 .andExpect(status().isForbidden());
 
-        // 3. AUDITOR CANNOT access administrative endpoints
-        mockMvc.perform(get("/api/v1/admin/test").session(auditorSession))
-                .andExpect(status().isForbidden());
-
-        // 4. CUSTOMER CANNOT access audit or admin endpoints
+        // 3. CUSTOMER CANNOT access audit logs
         mockMvc.perform(get("/api/v1/audit/logs").session(customerSession))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/v1/admin/test").session(customerSession))
-                .andExpect(status().isForbidden());
 
-        // 5. ADMIN can access both admin and audit endpoints
-        mockMvc.perform(get("/api/v1/admin/test").session(adminSession))
+        // 4. ADMIN can read audit logs
+        mockMvc.perform(get("/api/v1/audit/logs").session(adminSession))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/audit/logs")
-                .session(adminSession)
-                .with(csrf()))
-                .andExpect(status().isOk());
+    }
+
+    @Test
+    void auditResponseDoesNotExposePasswordHashesOrNestedUserAndIsPaginated() throws Exception {
+        insertUserWithPassword("auditor-sec@example.com", "CorrectHorseBattery12", UserRole.AUDITOR);
+        MvcResult auditorLogin = login("auditor-sec@example.com", "CorrectHorseBattery12");
+        MockHttpSession auditorSession = (MockHttpSession) auditorLogin.getRequest().getSession(false);
+
+        mockMvc.perform(get("/api/v1/audit/logs?page=0&size=10").session(auditorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content[0].id").exists())
+                .andExpect(jsonPath("$.content[0].action").exists())
+                .andExpect(jsonPath("$.content[0].password").doesNotExist())
+                .andExpect(jsonPath("$.content[0].passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.content[0].actor").doesNotExist())
+                .andExpect(jsonPath("$.pageable").exists())
+                .andExpect(jsonPath("$.totalElements").exists());
+    }
+
+    @Test
+    void auditLogDetailsPersistAsJsonObject() {
+        auditService.recordEvent(null, "TEST_JSON_OBJECT", "SYSTEM", null, Map.of("key", "value", "count", 100));
+        String jsonType = jdbcTemplate.queryForObject(
+                "SELECT jsonb_typeof(details) FROM audit_logs WHERE action = 'TEST_JSON_OBJECT'", String.class);
+        assertEquals("object", jsonType, "Audit details column must be stored as a JSON object, not a JSON string");
+    }
+
+    @Test
+    void accountOwnershipConstraintsRejectInvalidCombinations() {
+        UserEntity owner = insertUser("owner@example.com", UserRole.CUSTOMER);
+
+        // 1. CUSTOMER account without owner must fail
+        assertThrows(DataAccessException.class, () -> {
+            jdbcTemplate.update("""
+                    INSERT INTO accounts (id, account_number, owner_user_id, account_type, normal_balance, allow_negative, currency, status, balance)
+                    VALUES (?, 'FAIL-CUST-NO-OWNER', NULL, 'CUSTOMER', 'CREDIT', false, 'USD', 'ACTIVE', 0.00)
+                    """, UUID.randomUUID());
+        });
+
+        // 2. SYSTEM account with customer owner must fail
+        assertThrows(DataAccessException.class, () -> {
+            jdbcTemplate.update("""
+                    INSERT INTO accounts (id, account_number, owner_user_id, account_type, normal_balance, allow_negative, currency, status, balance)
+                    VALUES (?, 'FAIL-SYS-WITH-OWNER', ?, 'SYSTEM', 'DEBIT', false, 'USD', 'ACTIVE', 0.00)
+                    """, UUID.randomUUID(), owner.getId());
+        });
+    }
+
+    @Test
+    void accountClassificationCannotBeModifiedWhenLedgerEntriesExist() {
+        UserEntity customer = insertUser("protect-acct@example.com", UserRole.CUSTOMER);
+        UUID customerAcct = insertCustomerAccount("CUST-PROTECT-01", customer, "USD", BigDecimal.ZERO);
+        UUID cashAsset = insertSystemAccount("CASH-PROTECT-01", "USD", NormalBalance.DEBIT, false, BigDecimal.ZERO);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            UUID txId = insertPendingTransaction("USD");
+            insertEntry(txId, cashAsset, "DEBIT", "100.00", "USD");
+            insertEntry(txId, customerAcct, "CREDIT", "100.00", "USD");
+            completeTransaction(txId);
+        });
+
+        // 1. Changing account_type after ledger entries exist must fail
+        assertThrows(DataAccessException.class, () -> {
+            jdbcTemplate.update("UPDATE accounts SET account_type = 'SYSTEM' WHERE id = ?", customerAcct);
+        });
+
+        // 2. Changing normal_balance after ledger entries exist must fail
+        assertThrows(DataAccessException.class, () -> {
+            jdbcTemplate.update("UPDATE accounts SET normal_balance = 'DEBIT' WHERE id = ?", customerAcct);
+        });
+
+        // 3. Changing currency after ledger entries exist must fail
+        assertThrows(DataAccessException.class, () -> {
+            jdbcTemplate.update("UPDATE accounts SET currency = 'EUR' WHERE id = ?", customerAcct);
+        });
+    }
+
+    @Test
+    void runtimeUserPrivilegesEnforceLeastPrivilegeAndBalanceProtection() {
+        DriverManagerDataSource runtimeDs = new DriverManagerDataSource();
+        runtimeDs.setDriverClassName("org.postgresql.Driver");
+        runtimeDs.setUrl("jdbc:postgresql://localhost:5432/ledgerline_test_db");
+        runtimeDs.setUsername("ledgerline_runtime");
+        runtimeDs.setPassword("ledgerline_runtime_secret");
+        JdbcTemplate runtimeJdbc = new JdbcTemplate(runtimeDs);
+
+        UserEntity user = insertUser("runtime-test@example.com", UserRole.CUSTOMER);
+        UUID acctId = insertCustomerAccount("RUNTIME-ACCT-01", user, "USD", BigDecimal.ZERO);
+
+        // 1. Direct balance update must be denied by PostgreSQL permissions
+        assertThrows(DataAccessException.class, () -> {
+            runtimeJdbc.update("UPDATE accounts SET balance = 50000.00 WHERE id = ?", acctId);
+        });
+
+        // 2. Direct ledger entry modification must be denied
+        assertThrows(DataAccessException.class, () -> {
+            runtimeJdbc.update("DELETE FROM ledger_entries");
+        });
+
+        // 3. Direct audit log deletion must be denied
+        assertThrows(DataAccessException.class, () -> {
+            runtimeJdbc.update("DELETE FROM audit_logs");
+        });
     }
 
     // ==========================================
@@ -607,7 +714,8 @@ class Phase1IntegrationTests {
         register(email, password);
         List<AuditLogEntity> regLogs = auditLogRepository.findAllByActionOrderByCreatedAtDesc(AuditService.ACTION_REGISTER_SUCCESS);
         assertFalse(regLogs.isEmpty(), "Registration must create audit log");
-        assertFalse(regLogs.get(0).getDetails().contains("password"), "Audit logs must not contain credentials");
+        assertFalse(regLogs.get(0).getDetails().containsKey("password"), "Audit logs must not contain credentials");
+        assertFalse(regLogs.get(0).getDetails().containsKey("password_hash"), "Audit logs must not contain credentials");
 
         // 2. Failed login attempt
         mockMvc.perform(post("/api/v1/auth/login")

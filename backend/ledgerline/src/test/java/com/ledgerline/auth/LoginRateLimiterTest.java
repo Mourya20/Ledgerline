@@ -1,7 +1,9 @@
 package com.ledgerline.auth;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -52,20 +54,21 @@ class LoginRateLimiterTest {
         String ip = "192.168.1.10";
         String email = "user@example.com";
 
-        // 3 failures allowed
+        // 3 attempts reserved
         for (int i = 0; i < 3; i++) {
-            assertDoesNotThrow(() -> limiter.checkAllowed(ip, email));
-            limiter.recordFailure(ip, email);
+            assertDoesNotThrow(() -> limiter.acquireAttempt(ip, email));
         }
 
-        // 4th request must be rejected
-        assertThrows(RateLimitExceededException.class, () -> limiter.checkAllowed(ip, email));
+        // 4th request must be rejected with retry interval
+        RateLimitExceededException ex = assertThrows(RateLimitExceededException.class,
+                () -> limiter.acquireAttempt(ip, email));
+        assertTrue(ex.getRetryAfterSeconds() > 0);
 
         // Advance past window (11 minutes)
         clock.advance(Duration.ofMinutes(11));
 
         // Should recover and be allowed
-        assertDoesNotThrow(() -> limiter.checkAllowed(ip, email));
+        assertDoesNotThrow(() -> limiter.acquireAttempt(ip, email));
     }
 
     @Test
@@ -78,77 +81,97 @@ class LoginRateLimiterTest {
         String email1 = "alice@example.com";
         String email2 = "bob@example.com";
 
-        limiter.recordFailure(ip1, email1);
-        limiter.recordFailure(ip1, email1);
+        limiter.acquireAttempt(ip1, email1);
+        limiter.acquireAttempt(ip1, email1);
 
         // alice from ip1 is blocked
-        assertThrows(RateLimitExceededException.class, () -> limiter.checkAllowed(ip1, email1));
+        assertThrows(RateLimitExceededException.class, () -> limiter.acquireAttempt(ip1, email1));
 
         // bob from ip2 should be allowed
-        assertDoesNotThrow(() -> limiter.checkAllowed(ip2, email2));
+        assertDoesNotThrow(() -> limiter.acquireAttempt(ip2, email2));
 
         // bob from ip1 should be blocked because ip1 is blocked
-        assertThrows(RateLimitExceededException.class, () -> limiter.checkAllowed(ip1, email2));
+        assertThrows(RateLimitExceededException.class, () -> limiter.acquireAttempt(ip1, email2));
 
         // alice from ip2 should be blocked because alice email is blocked
-        assertThrows(RateLimitExceededException.class, () -> limiter.checkAllowed(ip2, email1));
+        assertThrows(RateLimitExceededException.class, () -> limiter.acquireAttempt(ip2, email1));
     }
 
     @Test
-    void successClearsFailureCount() {
+    void successClearsEmailIdentifierButPreservesSharedIpCounter() {
         MutableClock clock = new MutableClock(Instant.parse("2026-11-08T12:00:00Z"));
         LoginRateLimiter limiter = new LoginRateLimiter(2, Duration.ofMinutes(5), 100, clock);
 
-        limiter.recordFailure("127.0.0.1", "test@example.com");
-        limiter.recordSuccess("127.0.0.1", "test@example.com");
+        String sharedIp = "192.168.100.50";
+        String attacker = "attacker@example.com";
+        String legitimate = "legit@example.com";
 
-        // Record 1 more failure - should still be below limit of 2
-        limiter.recordFailure("127.0.0.1", "test@example.com");
-        assertDoesNotThrow(() -> limiter.checkAllowed("127.0.0.1", "test@example.com"));
+        // Attacker exhausts attempts from shared IP
+        limiter.acquireAttempt(sharedIp, attacker);
+        limiter.acquireAttempt(sharedIp, attacker);
+
+        // Shared IP is blocked
+        assertThrows(RateLimitExceededException.class, () -> limiter.acquireAttempt(sharedIp, attacker));
+
+        // Legitimate user logs in successfully (e.g. from another IP or existing auth)
+        limiter.recordSuccess(sharedIp, legitimate);
+
+        // Shared IP counter must NOT be reset by legitimate user's login!
+        assertThrows(RateLimitExceededException.class, () -> limiter.acquireAttempt(sharedIp, attacker));
     }
 
     @Test
-    void concurrentRequestsAreThreadSafe() throws InterruptedException {
-        int threads = 10;
-        LoginRateLimiter limiter = new LoginRateLimiter(50, Duration.ofMinutes(5), 1000, Clock.systemUTC());
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-        CountDownLatch latch = new CountDownLatch(threads);
-        AtomicInteger successChecks = new AtomicInteger();
+    void concurrentAttemptReservationIsAtomic() throws InterruptedException {
+        int limit = 20;
+        int callers = 40;
+        LoginRateLimiter limiter = new LoginRateLimiter(limit, Duration.ofMinutes(5), 1000, Clock.systemUTC());
+        ExecutorService executor = Executors.newFixedThreadPool(10);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(callers);
 
-        for (int i = 0; i < threads; i++) {
+        AtomicInteger allowed = new AtomicInteger();
+        AtomicInteger rejected = new AtomicInteger();
+
+        for (int i = 0; i < callers; i++) {
             executor.submit(() -> {
                 try {
-                    for (int j = 0; j < 5; j++) {
-                        limiter.checkAllowed("192.168.1.1", "concurrent@example.com");
-                        successChecks.incrementAndGet();
-                        limiter.recordFailure("192.168.1.1", "concurrent@example.com");
-                    }
+                    startLatch.await();
+                    limiter.acquireAttempt("10.10.10.10", "concurrent@example.com");
+                    allowed.incrementAndGet();
+                } catch (RateLimitExceededException e) {
+                    rejected.incrementAndGet();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 } finally {
-                    latch.countDown();
+                    doneLatch.countDown();
                 }
             });
         }
 
-        latch.await();
+        startLatch.countDown();
+        doneLatch.await();
         executor.shutdown();
 
-        // 50 total failures recorded = maxAttempts reached
-        assertThrows(RateLimitExceededException.class,
-                () -> limiter.checkAllowed("192.168.1.1", "concurrent@example.com"));
+        assertEquals(limit, allowed.get(), "Exactly the limit should be allowed");
+        assertEquals(callers - limit, rejected.get(), "The excess attempts should be rejected");
     }
 
     @Test
-    void boundedStoreEnforcesMaximumSize() {
+    void boundedStoreEnforcesMaximumSizeAndProtectsUnboundedIdentifiers() {
         MutableClock clock = new MutableClock(Instant.parse("2026-11-08T12:00:00Z"));
         int maxCapacity = 20;
         LoginRateLimiter limiter = new LoginRateLimiter(5, Duration.ofMinutes(5), maxCapacity, clock);
 
-        // Record failures for 100 distinct random identifiers
+        // Huge identifier must be safely handled without error
+        String hugeEmail = "a".repeat(10_000) + "@example.com";
+        assertDoesNotThrow(() -> limiter.acquireAttempt("127.0.0.1", hugeEmail));
+
+        // Record failures for 100 distinct identifiers
         for (int i = 0; i < 100; i++) {
             limiter.recordFailure("ip-" + i, "user" + i + "@example.com");
         }
 
-        // Must not blow up heap; operations continue normally
+        // Capacity bound prevents heap exhaustion; operations proceed normally
         assertDoesNotThrow(() -> limiter.checkAllowed("ip-999", "new@example.com"));
     }
 }
