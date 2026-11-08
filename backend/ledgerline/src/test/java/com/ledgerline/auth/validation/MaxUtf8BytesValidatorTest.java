@@ -10,36 +10,16 @@ class MaxUtf8BytesValidatorTest {
 
     private MaxUtf8BytesValidator validator;
 
+    @MaxUtf8Bytes(max = 72)
+    private String sampleField;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws NoSuchFieldException {
         validator = new MaxUtf8BytesValidator();
-        // Default max is 72
-        validator.initialize(new MaxUtf8Bytes() {
-            @Override
-            public Class<? extends java.lang.annotation.Annotation> annotationType() {
-                return MaxUtf8Bytes.class;
-            }
-
-            @Override
-            public String message() {
-                return "Exceeds max bytes";
-            }
-
-            @Override
-            public Class<?>[] groups() {
-                return new Class<?>[0];
-            }
-
-            @Override
-            public Class<? extends jakarta.validation.Payload>[] payload() {
-                return new Class[0];
-            }
-
-            @Override
-            public int max() {
-                return 72;
-            }
-        });
+        MaxUtf8Bytes annotation = MaxUtf8BytesValidatorTest.class
+                .getDeclaredField("sampleField")
+                .getAnnotation(MaxUtf8Bytes.class);
+        validator.initialize(annotation);
     }
 
     @Test

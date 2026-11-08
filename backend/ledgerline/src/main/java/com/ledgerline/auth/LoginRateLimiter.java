@@ -6,10 +6,10 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -21,6 +21,7 @@ public class LoginRateLimiter {
     private final Clock clock;
     private final ConcurrentHashMap<String, Deque<Instant>> attempts = new ConcurrentHashMap<>();
 
+    @Autowired
     public LoginRateLimiter() {
         this(5, Duration.ofMinutes(15), 10_000, Clock.systemUTC());
     }
@@ -97,52 +98,45 @@ public class LoginRateLimiter {
 
         AtomicLong retryAfter = new AtomicLong(0);
         attempts.compute(key, (k, deque) -> {
-            if (deque == null) {
-                deque = new ArrayDeque<>();
+            Deque<Instant> current = (deque == null) ? new ArrayDeque<>() : deque;
+            cleanExpired(current, now);
+            if (current.size() >= maxAttempts) {
+                Instant oldest = current.peekFirst();
+                long seconds = oldest != null
+                        ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
+                        : windowDuration.toSeconds();
+                retryAfter.set(Math.max(1, seconds));
+                return current;
             }
-            synchronized (deque) {
-                cleanExpired(deque, now);
-                if (deque.size() >= maxAttempts) {
-                    Instant oldest = deque.peekFirst();
-                    long seconds = oldest != null
-                            ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
-                            : windowDuration.toSeconds();
-                    retryAfter.set(Math.max(1, seconds));
-                    return deque;
-                }
-                deque.addLast(now);
-                return deque;
-            }
+            current.addLast(now);
+            return current;
         });
         return retryAfter.get();
     }
 
     private void rollbackAttempt(String key, Instant now) {
-        Deque<Instant> deque = attempts.get(key);
-        if (deque != null) {
-            synchronized (deque) {
-                deque.removeLastOccurrence(now);
-            }
-        }
+        attempts.computeIfPresent(key, (k, deque) -> {
+            deque.removeLastOccurrence(now);
+            return deque.isEmpty() ? null : deque;
+        });
     }
 
     private long getRetryAfterSecondsIfExceeded(String key, Instant now) {
-        Deque<Instant> timestamps = attempts.get(key);
-        if (timestamps == null) {
-            return 0;
-        }
-        synchronized (timestamps) {
-            cleanExpired(timestamps, now);
-            if (timestamps.size() >= maxAttempts) {
-                Instant oldest = timestamps.peekFirst();
+        AtomicLong retryAfter = new AtomicLong(0);
+        attempts.computeIfPresent(key, (k, deque) -> {
+            cleanExpired(deque, now);
+            if (deque.size() >= maxAttempts) {
+                Instant oldest = deque.peekFirst();
                 if (oldest != null) {
                     long seconds = Duration.between(now, oldest.plus(windowDuration)).toSeconds();
-                    return Math.max(1, seconds);
+                    retryAfter.set(Math.max(1, seconds));
+                } else {
+                    retryAfter.set(windowDuration.toSeconds());
                 }
-                return windowDuration.toSeconds();
             }
-            return 0;
-        }
+            return deque.isEmpty() ? null : deque;
+        });
+        return retryAfter.get();
     }
 
     private void cleanExpired(Deque<Instant> deque, Instant now) {
@@ -153,15 +147,11 @@ public class LoginRateLimiter {
     }
 
     private void evictExpiredKeys(Instant now) {
-        Instant cutoff = now.minus(windowDuration);
-        for (Map.Entry<String, Deque<Instant>> entry : attempts.entrySet()) {
-            Deque<Instant> deque = entry.getValue();
-            synchronized (deque) {
+        for (String key : attempts.keySet()) {
+            attempts.computeIfPresent(key, (k, deque) -> {
                 cleanExpired(deque, now);
-                if (deque.isEmpty()) {
-                    attempts.remove(entry.getKey(), deque);
-                }
-            }
+                return deque.isEmpty() ? null : deque;
+            });
         }
     }
 
