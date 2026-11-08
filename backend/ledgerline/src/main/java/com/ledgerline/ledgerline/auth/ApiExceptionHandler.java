@@ -23,6 +23,11 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
     }
 
+    @ExceptionHandler(RateLimitExceededException.class)
+    ResponseEntity<Map<String, String>> rateLimitExceeded(RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<Map<String, String>> invalidRequest() {
         return ResponseEntity.badRequest().body(Map.of("error", "Request validation failed"));

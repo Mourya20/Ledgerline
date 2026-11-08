@@ -58,4 +58,32 @@ public class AuditLogEntity {
     void onCreate() {
         createdAt = Instant.now();
     }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UserEntity getActor() {
+        return actor;
+    }
+
+    public String getAction() {
+        return action;
+    }
+
+    public String getResourceType() {
+        return resourceType;
+    }
+
+    public UUID getResourceId() {
+        return resourceId;
+    }
+
+    public String getDetails() {
+        return details;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
 }

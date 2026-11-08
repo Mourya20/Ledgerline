@@ -1,10 +1,14 @@
 package com.ledgerline.ledgerline.security;
 
 import java.util.Arrays;
+import java.util.Map;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -16,6 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.authentication.session.SessionFixationProtectionStrategy;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -24,13 +30,22 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import com.ledgerline.ledgerline.audit.AuditService;
+import com.ledgerline.ledgerline.repository.UserRepository;
+
 @Configuration
 public class SecurityConfig {
 
     private final SessionUserValidationFilter sessionUserValidationFilter;
+    private final UserRepository userRepository;
+    private final AuditService auditService;
 
-    public SecurityConfig(SessionUserValidationFilter sessionUserValidationFilter) {
+    public SecurityConfig(SessionUserValidationFilter sessionUserValidationFilter,
+            UserRepository userRepository,
+            AuditService auditService) {
         this.sessionUserValidationFilter = sessionUserValidationFilter;
+        this.userRepository = userRepository;
+        this.auditService = auditService;
     }
 
     @Bean
@@ -57,7 +72,13 @@ public class SecurityConfig {
     }
 
     @Bean
+    SessionAuthenticationStrategy sessionAuthenticationStrategy() {
+        return new SessionFixationProtectionStrategy();
+    }
+
+    @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository securityContextRepository,
+            SessionAuthenticationStrategy sessionAuthenticationStrategy,
             AuthenticationProvider authenticationProvider, CorsConfigurationSource corsConfigurationSource,
             AccessDeniedHandler accessDeniedHandler) throws Exception {
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
@@ -69,7 +90,7 @@ public class SecurityConfig {
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
-                        .sessionFixation(sessionFixation -> sessionFixation.migrateSession()))
+                        .sessionAuthenticationStrategy(sessionAuthenticationStrategy))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokens)
@@ -79,14 +100,28 @@ public class SecurityConfig {
                                 "/actuator/health")
                         .permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/v1/audit/**").hasAnyRole("ADMIN", "AUDITOR")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/audit/**").hasAnyRole("ADMIN", "AUDITOR")
+                        .requestMatchers("/api/v1/audit/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, exception) -> response.sendError(401,
-                                "Authentication required"))
+                        .authenticationEntryPoint((request, response, exception) -> response.sendError(
+                                HttpServletResponse.SC_UNAUTHORIZED, "Authentication required"))
                         .accessDeniedHandler(accessDeniedHandler))
                 .logout(logout -> logout
                         .logoutUrl("/api/v1/auth/logout")
+                        .addLogoutHandler((request, response, authentication) -> {
+                            if (authentication != null) {
+                                userRepository.findByEmailIgnoreCase(authentication.getName())
+                                        .ifPresent(user -> auditService.recordEvent(user,
+                                                AuditService.ACTION_LOGOUT, "USER", user.getId(),
+                                                Map.of("email", user.getEmail(), "ip", request.getRemoteAddr())));
+                            }
+                        })
+                        .logoutSuccessHandler((request, response, authentication) -> {
+                            response.setStatus(HttpServletResponse.SC_OK);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"message\":\"Logged out successfully\"}");
+                        })
                         .invalidateHttpSession(true)
                         .clearAuthentication(true)
                         .deleteCookies("JSESSIONID", "XSRF-TOKEN"))
@@ -97,7 +132,7 @@ public class SecurityConfig {
 
     @Bean
     AccessDeniedHandler accessDeniedHandler() {
-        return (request, response, exception) -> response.sendError(403, "Access denied");
+        return (request, response, exception) -> response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access denied");
     }
 
     @Bean
