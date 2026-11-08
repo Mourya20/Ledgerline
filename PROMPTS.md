@@ -26,4 +26,4 @@ The first JPA validation run exposed a PostgreSQL `CHAR` versus Hibernate string
 
 ### Commit
 
-Commit link: pending the local Phase 1 commit.
+Commit link: https://github.com/Mourya20/Vaultora-Banking-System/commit/6afeb88
