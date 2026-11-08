@@ -1,13 +1,16 @@
 package com.ledgerline.ledgerline.repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.ledgerline.ledgerline.domain.AccountEntity;
 
-public interface AccountRepository extends JpaRepository<AccountEntity, UUID> {
+public interface AccountRepository extends JpaRepository<AccountEntity, UUID>, AccountRepositoryCustom {
 
     List<AccountEntity> findAllByOwnerId(UUID ownerId);
+
+    Optional<AccountEntity> findByAccountNumber(String accountNumber);
 }

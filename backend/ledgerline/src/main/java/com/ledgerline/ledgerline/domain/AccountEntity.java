@@ -34,6 +34,13 @@ public class AccountEntity {
     @Column(name = "account_type", nullable = false, length = 20)
     private AccountType accountType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "normal_balance", nullable = false, length = 6)
+    private NormalBalance normalBalance;
+
+    @Column(name = "allow_negative", nullable = false)
+    private boolean allowNegative;
+
     @Column(nullable = false, length = 3)
     private String currency;
 
@@ -54,10 +61,19 @@ public class AccountEntity {
     }
 
     public AccountEntity(String accountNumber, UserEntity owner, AccountType accountType, String currency) {
+        this(accountNumber, owner, accountType,
+                accountType == AccountType.CUSTOMER ? NormalBalance.CREDIT : NormalBalance.DEBIT,
+                false, currency);
+    }
+
+    public AccountEntity(String accountNumber, UserEntity owner, AccountType accountType,
+            NormalBalance normalBalance, boolean allowNegative, String currency) {
         this.id = UUID.randomUUID();
         this.accountNumber = accountNumber;
         this.owner = owner;
         this.accountType = accountType;
+        this.normalBalance = normalBalance;
+        this.allowNegative = allowNegative;
         this.currency = currency;
         this.status = AccountStatus.ACTIVE;
         this.balance = BigDecimal.ZERO.setScale(2);
@@ -79,6 +95,10 @@ public class AccountEntity {
         return id;
     }
 
+    public String getAccountNumber() {
+        return accountNumber;
+    }
+
     public UserEntity getOwner() {
         return owner;
     }
@@ -87,8 +107,20 @@ public class AccountEntity {
         return accountType;
     }
 
+    public NormalBalance getNormalBalance() {
+        return normalBalance;
+    }
+
+    public boolean isAllowNegative() {
+        return allowNegative;
+    }
+
     public String getCurrency() {
         return currency;
+    }
+
+    public AccountStatus getStatus() {
+        return status;
     }
 
     public BigDecimal getBalance() {
