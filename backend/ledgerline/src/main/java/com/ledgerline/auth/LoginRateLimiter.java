@@ -5,13 +5,19 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.Iterator;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * In-memory sliding-window login rate limiter enforcing independent IP and identifier limits.
+ * Uses a thread-safe, access-ordered LRU map to bound memory footprint and evict the
+ * least-recently-used key when capacity is exceeded.
+ *
+ * Default configuration: 5 attempts per 15-minute window, bounded at 10,000 tracked keys.
+ */
 @Component
 public class LoginRateLimiter {
 
@@ -19,7 +25,7 @@ public class LoginRateLimiter {
     private final Duration windowDuration;
     private final int maxTrackedKeys;
     private final Clock clock;
-    private final ConcurrentHashMap<String, Deque<Instant>> attempts = new ConcurrentHashMap<>();
+    private final Map<String, Deque<Instant>> attempts;
 
     @Autowired
     public LoginRateLimiter() {
@@ -31,6 +37,12 @@ public class LoginRateLimiter {
         this.windowDuration = windowDuration;
         this.maxTrackedKeys = maxTrackedKeys;
         this.clock = clock;
+        this.attempts = new LinkedHashMap<>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Deque<Instant>> eldest) {
+                return size() > maxTrackedKeys;
+            }
+        };
     }
 
     /**
@@ -70,8 +82,10 @@ public class LoginRateLimiter {
     }
 
     public void recordSuccess(String ip, String email) {
-        attempts.remove(toEmailKey(email));
-        // Shared IP counter is intentionally NOT reset on individual success
+        synchronized (attempts) {
+            attempts.remove(toEmailKey(email));
+            // Shared IP counter is intentionally NOT reset on individual success
+        }
     }
 
     public void recordFailure(String ip, String email) {
@@ -81,62 +95,71 @@ public class LoginRateLimiter {
     }
 
     public void reset() {
-        attempts.clear();
+        synchronized (attempts) {
+            attempts.clear();
+        }
+    }
+
+    public boolean containsKey(String key) {
+        synchronized (attempts) {
+            return attempts.containsKey(key);
+        }
+    }
+
+    public int getTrackedKeysCount() {
+        synchronized (attempts) {
+            return attempts.size();
+        }
     }
 
     private long tryReserve(String key, Instant now) {
-        if (attempts.size() >= maxTrackedKeys && !attempts.containsKey(key)) {
-            evictExpiredKeys(now);
-            if (attempts.size() >= maxTrackedKeys) {
-                Iterator<String> it = attempts.keySet().iterator();
-                if (it.hasNext()) {
-                    it.next();
-                    it.remove();
-                }
-            }
-        }
-
-        AtomicLong retryAfter = new AtomicLong(0);
-        attempts.compute(key, (k, deque) -> {
-            Deque<Instant> current = (deque == null) ? new ArrayDeque<>() : deque;
-            cleanExpired(current, now);
-            if (current.size() >= maxAttempts) {
-                Instant oldest = current.peekFirst();
-                long seconds = oldest != null
-                        ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
-                        : windowDuration.toSeconds();
-                retryAfter.set(Math.max(1, seconds));
-                return current;
-            }
-            current.addLast(now);
-            return current;
-        });
-        return retryAfter.get();
-    }
-
-    private void rollbackAttempt(String key, Instant now) {
-        attempts.computeIfPresent(key, (k, deque) -> {
-            deque.removeLastOccurrence(now);
-            return deque.isEmpty() ? null : deque;
-        });
-    }
-
-    private long getRetryAfterSecondsIfExceeded(String key, Instant now) {
-        AtomicLong retryAfter = new AtomicLong(0);
-        attempts.computeIfPresent(key, (k, deque) -> {
+        synchronized (attempts) {
+            Deque<Instant> deque = attempts.computeIfAbsent(key, k -> new ArrayDeque<>());
             cleanExpired(deque, now);
             if (deque.size() >= maxAttempts) {
                 Instant oldest = deque.peekFirst();
-                if (oldest != null) {
-                    long seconds = Duration.between(now, oldest.plus(windowDuration)).toSeconds();
-                    retryAfter.set(Math.max(1, seconds));
-                } else {
-                    retryAfter.set(windowDuration.toSeconds());
+                long seconds = oldest != null
+                        ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
+                        : windowDuration.toSeconds();
+                return Math.max(1, seconds);
+            }
+            deque.addLast(now);
+            return 0;
+        }
+    }
+
+    private void rollbackAttempt(String key, Instant now) {
+        synchronized (attempts) {
+            Deque<Instant> deque = attempts.get(key);
+            if (deque != null) {
+                deque.removeLastOccurrence(now);
+                if (deque.isEmpty()) {
+                    attempts.remove(key);
                 }
             }
-            return deque.isEmpty() ? null : deque;
-        });
-        return retryAfter.get();
+        }
+    }
+
+    private long getRetryAfterSecondsIfExceeded(String key, Instant now) {
+        synchronized (attempts) {
+            Deque<Instant> deque = attempts.get(key);
+            if (deque == null) {
+                return 0;
+            }
+            cleanExpired(deque, now);
+            if (deque.isEmpty()) {
+                attempts.remove(key);
+                return 0;
+            }
+            if (deque.size() >= maxAttempts) {
+                Instant oldest = deque.peekFirst();
+                long seconds = oldest != null
+                        ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
+                        : windowDuration.toSeconds();
+                return Math.max(1, seconds);
+            }
+            return 0;
+        }
     }
 
     private void cleanExpired(Deque<Instant> deque, Instant now) {
@@ -146,16 +169,7 @@ public class LoginRateLimiter {
         }
     }
 
-    private void evictExpiredKeys(Instant now) {
-        for (String key : attempts.keySet()) {
-            attempts.computeIfPresent(key, (k, deque) -> {
-                cleanExpired(deque, now);
-                return deque.isEmpty() ? null : deque;
-            });
-        }
-    }
-
-    private String toIpKey(String ip) {
+    public String toIpKey(String ip) {
         String cleanIp = (ip == null ? "unknown" : ip.trim());
         if (cleanIp.length() > 64) {
             cleanIp = cleanIp.substring(0, 64);
@@ -163,7 +177,7 @@ public class LoginRateLimiter {
         return "ip:" + cleanIp;
     }
 
-    private String toEmailKey(String email) {
+    public String toEmailKey(String email) {
         String cleanEmail = (email == null ? "unknown" : AuthService.normalizeEmail(email));
         if (cleanEmail.length() > 255) {
             cleanEmail = cleanEmail.substring(0, 255);

@@ -134,7 +134,19 @@ public class AccountEntity {
         return status;
     }
 
+    public void setStatus(AccountStatus status) {
+        this.status = status;
+    }
+
     public BigDecimal getBalance() {
         return balance;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

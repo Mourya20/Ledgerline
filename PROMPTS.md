@@ -24,7 +24,7 @@ Investigate build and startup failures for LedgerLine on Windows when attempting
 
 ### Commit Reference
 - Commit: `f353dfc` (`chore: established Spring Boot backend and PostgreSQL setup`)
-- Commit link: https://github.com/Mourya20/Vaultora-Banking-System/commit/f353dfc
+- Commit link: https://github.com/Mourya20/Ledgerline/commit/f353dfc
 
 ---
 
@@ -48,7 +48,7 @@ Implement Phase 1 database foundation and session authentication for LedgerLine.
 
 ### Commit Reference
 - Commit: `6afeb88` (`feat: add database foundation and authentication`)
-- Commit link: https://github.com/Mourya20/Vaultora-Banking-System/commit/6afeb88
+- Commit link: https://github.com/Mourya20/Ledgerline/commit/6afeb88
 
 ---
 
@@ -73,7 +73,7 @@ Design and verify role-based access control (RBAC) to ensure unauthenticated use
 
 ### Commit Reference
 - Commit: `5b47420` (`test: cover public role escalation attempts`)
-- Commit link: https://github.com/Mourya20/Vaultora-Banking-System/commit/5b47420
+- Commit link: https://github.com/Mourya20/Ledgerline/commit/5b47420
 
 ---
 
@@ -96,7 +96,7 @@ Establish an immutable audit logging subsystem to satisfy financial auditability
 
 ### Commit Reference
 - Commit: `0275372` (`test: isolate PostgreSQL integration fixtures`)
-- Commit link: https://github.com/Mourya20/Vaultora-Banking-System/commit/0275372
+- Commit link: https://github.com/Mourya20/Ledgerline/commit/0275372
 
 ---
 
@@ -157,9 +157,9 @@ Perform a complete remediation of Phase 1 based on an independent senior-develop
 - Deferred commit triggers verified: unbalanced transactions and pending transactions with entries correctly rejected at commit.
 
 ### Commit References
-- Accounting remediation: `9e47971` (https://github.com/Mourya20/Vaultora-Banking-System/commit/9e47971)
-- Security & audit hardening: `725cad4` (https://github.com/Mourya20/Vaultora-Banking-System/commit/725cad4)
-- Test isolation & test suite: `af0c689` (https://github.com/Mourya20/Vaultora-Banking-System/commit/af0c689)
+- Accounting remediation: `9e47971` (https://github.com/Mourya20/Ledgerline/commit/9e47971)
+- Security & audit hardening: `725cad4` (https://github.com/Mourya20/Ledgerline/commit/725cad4)
+- Test isolation & test suite: `af0c689` (https://github.com/Mourya20/Ledgerline/commit/af0c689)
 
 ---
 
@@ -218,3 +218,152 @@ Execute comprehensive Phase 1 code cleanup, security hardening, and architectura
 
 ### Commit References
 - Package restructuring: `fc7418f` (`refactor: simplify duplicated Java package structure`)
+
+---
+
+## 6. 2026-11-08 - Phase 2 Financial Transaction Engine Implementation
+
+### Prompt & Context
+Implement Phase 2: the complete financial transaction engine for LedgerLine on branch `feature/phase-2-financial-engine`. The engine must support authenticated customer account management, simulated double-entry cash deposits and withdrawals, peer-to-peer customer transfers, atomic execution, robust idempotency, deterministic concurrency control, ownership enforcement, transaction history, and comprehensive multithreaded integration tests against PostgreSQL 18. Git commits and staging are strictly reserved for the user.
+
+### Architectural Decisions & Implementation
+- **Branch Management**:
+  - Confirmed and checked out `feature/phase-2-financial-engine`. All changes kept unstaged/uncommitted in the working tree.
+- **Database Schema Migration `V7` (`V7__provision_system_accounts_and_financial_engine_indexes.sql`)**:
+  - Seeded operational `SYSTEM` cash asset vault account for INR (`id = '00000000-0000-0000-0000-000000000001'`, `account_number = 'SYS-INR-CASH-VAULT-001'`, `currency = 'INR'`, `normal_balance = 'DEBIT'`).
+  - Added performance indexes for transaction timestamp retrieval (`ledger_transactions(created_at DESC)`), account ledger query ordering (`ledger_entries(account_id, created_at DESC)`), and debit/credit entry aggregations (`ledger_entries(account_id, entry_type)`).
+- **Core Domain & Account Management**:
+  - Implemented `AccountService` and `AccountController`: authenticated account creation, backend generation of unique 16-character account numbers (`VLTR` + 12 random digits), strict currency restriction ("INR"), default `CUSTOMER` classification and `CREDIT` normal balance, zero initial balance projection.
+  - Implemented account balance retrieval (`GET /api/v1/accounts/{id}/balance`) and list retrieval (`GET /api/v1/accounts`) with strict server-side owner-user filtering.
+  - Enforced system account isolation: customer access to `SYSTEM` accounts is rejected with HTTP 403 Forbidden.
+- **Double-Entry Financial Operations (`TransactionService` & `TransactionController`)**:
+  - **Deposit (`POST /api/v1/transactions/deposit`)**: Resolves customer liability account and internal system cash asset counterpart; acquires row-level locks; creates `DEPOSIT` transaction; inserts balanced entries (System Cash Vault `DEBIT`, Customer Liability `CREDIT`); trigger increments both balances; persists `TRANSACTION_DEPOSIT` audit log.
+  - **Withdrawal (`POST /api/v1/transactions/withdraw`)**: Acquires row-level locks; validates customer balance >= amount and system counterpart liquidity >= amount under lock; inserts balanced entries (Customer Liability `DEBIT`, System Cash Vault `CREDIT`); trigger decrements both balances; persists `TRANSACTION_WITHDRAW` audit log; rejects overdrafts with HTTP 422 Unprocessable Content.
+  - **Transfer (`POST /api/v1/transactions/transfer`)**: Resolves source and destination customer accounts; rejects self-transfers, cross-currency transfers, and system account destinations; acquires row locks; validates sender balance under lock; inserts balanced entries (Sender `DEBIT`, Receiver `CREDIT`); leaves system cash vault untouched; persists `TRANSACTION_TRANSFER` audit log.
+- **Deterministic Concurrency & Deadlock Prevention**:
+  - Multi-account locking method `lockAccountsInDeterministicOrder(UUID id1, UUID id2)` sorts participating account IDs in natural ascending UUID order before issuing `accountRepository.findByIdForUpdate(id)` (`SELECT ... FOR UPDATE`). Eliminates database deadlocks during simultaneous opposing-direction transfers (A->B and B->A).
+- **Concurrency-Safe Idempotency Engine**:
+  - Mandatory `Idempotency-Key` header with SHA-256 request payload fingerprinting.
+  - Double-checked locking pattern: When concurrent requests race with the same key, the second thread blocks on the account lock; upon waking after the first commits, a post-lock idempotency re-check detects the newly committed transaction and immediately returns the original response with zero duplicate ledger entries.
+  - Payload mutation with the same key is detected and rejected with HTTP 409 Conflict.
+- **Security & RBAC Enforcement**:
+  - Allowed `Idempotency-Key` in CORS exposed headers.
+  - Restricted `POST /api/v1/transactions/**` and `POST /api/v1/accounts/**` to `hasAnyRole('CUSTOMER', 'ADMIN')`, explicitly blocking the `AUDITOR` role from creating accounts or moving funds.
+
+### Verification
+- Executed `Phase2FinancialEngineIntegrationTests` with 31 integration and multithreaded concurrency tests against real PostgreSQL 18.
+- Verified concurrent double-withdrawal overdraft prevention: 2 threads each requesting ₹800 against ₹1,000 balance -> exactly 1 succeeds, 1 rejected with 422, final balance ₹200.
+- Verified bilateral deadlock prevention: 10 concurrent opposing transfers between A and B complete with 0 deadlocks and exact balance preservation.
+- Verified concurrent duplicate requests: 2 threads with identical idempotency key execute exactly once, returning identical transaction IDs with 0 duplicate ledger entries.
+- Verified financial reconciliation: global `SUM(DEBIT) == SUM(CREDIT)` across all ledger entries, and every account's projected `balance` strictly equals `SUM(entries)` directly calculated in SQL.
+- Executed full test suite across the application (`mvnw.cmd test`): **72 total tests run, 0 failures, 0 errors, 0 skipped**.
+- Full build and package check (`mvnw.cmd clean verify`) succeeded.
+
+---
+
+## 7. 2026-11-08 - Phase 2 Remediation: Financial Integrity, Database Security, Idempotency & Privacy
+
+### Prompt & Context
+Execute comprehensive remediation of Phase 2 financial engine on branch `feature/phase-2-financial-engine`:
+1. Harden database privileges: Revoke excessive runtime permissions granted to `ledgerline_runtime` in V6 (TRUNCATE, DELETE, unrestricted UPDATE on users, role promotion, password tampering, `allow_negative`).
+2. Remove hardcoded database passwords; separate runtime JPA (`APP_DB_*`) and Flyway migration (`FLYWAY_DB_*`) credentials.
+3. Make concurrent idempotency handling reliable: Replace post-collision queries in aborted PostgreSQL transactions with transaction-scoped advisory locking (`pg_advisory_xact_lock`), canonical scale-2 fingerprinting, and cross-account serialization.
+4. Validate system counterpart accounts: Remove arbitrary fallback selection; strictly enforce canonical `SYS-INR-CASH-VAULT-001` properties (SYSTEM, null owner, INR, DEBIT normal, ACTIVE, allow_negative=false).
+5. Protect transaction response privacy: Viewer-aware transaction responses masking system accounts as `"Cash/Bank Counterpart"` (null UUID) and counterpart customers as `"****1234"` (null UUID); remove `normalBalance` from customer `AccountResponse`.
+6. Strengthen input validation: Scale-2 amount validation, uppercase currency check, max 255-char key validation.
+7. Optimize transaction history: Eliminate N+1 entry queries using batch retrieval (`findAllByTransactionIdIn`).
+8. Correct account-number generation: Replace `Math.abs(RANDOM.nextLong())` (which overflows on `Long.MIN_VALUE`) with bounded `RANDOM.nextLong(100_000_000_000L, 1_000_000_000_000L)`.
+9. Expand test coverage and update documentation. All changes must remain unstaged and uncommitted.
+
+### Architectural Decisions & Implementation
+- **Database Privilege Hardening (`V8__harden_runtime_database_privileges.sql`)**:
+  - Revoked `TRUNCATE` across all tables from `ledgerline_runtime`.
+  - Revoked `DELETE` across all tables from `ledgerline_runtime`.
+  - Column-restricted `UPDATE` on `users` strictly to `(status, updated_at)` (eliminates role escalation and direct password hash manipulation).
+  - Column-restricted `UPDATE` on `accounts` strictly to `(status, updated_at)` (revokes `allow_negative`, blocks arbitrary balance tampering).
+  - Column-restricted `UPDATE` on `ledger_transactions` to `(status, completed_at)`.
+  - Reaffirmed append-only `ledger_entries` and `audit_logs` (all `UPDATE` and `DELETE` revoked).
+  - Revoked `CREATE` on schema `public`.
+  - Added DO block validating canonical properties of `SYS-INR-CASH-VAULT-001`.
+- **Database Credential Configuration**:
+  - Removed all hardcoded fallback passwords from `application.properties` and `application-test.properties`.
+  - Configured mandatory environment variables `APP_DB_*` (runtime) and `FLYWAY_DB_*` (schema migrations).
+- **PostgreSQL Transaction-Scoped Advisory Locking (`TransactionService.java`)**:
+  - Implemented `acquireIdempotencyAdvisoryLock` using `pg_advisory_xact_lock(bigint)` on SHA-256 hash of `userId + ":" + normalizedKey`.
+  - Pre-reserves key at transaction start, serializing duplicate requests even across different accounts for the same user without encountering abort-inducing uniqueness collisions.
+  - Normalized monetary amount to scale 2 (`amount.setScale(2, RoundingMode.UNNECESSARY)`) and currency with `Locale.ROOT` for canonical request fingerprinting.
+  - Eliminated post-collision recovery query that attempted to query inside an aborted transaction.
+- **Strict System Counterpart Validation (`TransactionService.java`)**:
+  - Eliminated arbitrary fallback selection; strictly queries canonical `SYS-{currency}-CASH-VAULT-001`.
+  - Enforced exact properties: `accountType == SYSTEM`, `owner == null`, currency match, `normalBalance == DEBIT`, `status == ACTIVE`, `allowNegative == false`.
+- **Viewer-Aware Response Privacy**:
+  - Updated `TransactionEntryResponse.fromEntity(entry, viewerUserId)`:
+    - System accounts: `accountId = null`, `accountNumber = "Cash/Bank Counterpart"`.
+    - Other customer accounts: `accountId = null`, `accountNumber = "****" + last4`.
+    - Own customer account: full `accountId` and full `accountNumber`.
+  - Removed `NormalBalance normalBalance` from customer `AccountResponse`.
+- **Query Optimization & Secure Random**:
+  - Added batch query `findAllByTransactionIdIn` in `LedgerEntryRepository` with JOIN FETCH on account and owner, grouping entries by transaction ID and eliminating N+1 queries. Capped page size at 100.
+  - Replaced `Math.abs(RANDOM.nextLong())` in `AccountService` with `SecureRandom.nextLong(100_000_000_000L, 1_000_000_000_000L)`.
+
+### Verification
+- Executed `Phase2FinancialEngineIntegrationTests` against `ledgerline_test_db`: 43 tests passed.
+  - Verified runtime database privileges via direct JDBC connection as `ledgerline_runtime`: TRUNCATE, user role promotion, password tampering, `allow_negative` tampering, balance tampering, and entry deletion all rejected with SQL exception 42501.
+  - Verified cross-account idempotency serialization: duplicate request with same key across different accounts rejected with 409 Conflict; exactly one financial operation executed.
+  - Verified canonical fingerprint matching (100.0 vs 100.00).
+  - Verified response privacy masking for sender, receiver, and system cash vault.
+  - Verified strict system counterpart property validation.
+  - Verified validation rejections for scale > 2, negative amount, key > 255 chars, invalid currency.
+- Executed full Maven test suite (`mvnw.cmd test`): **84 total tests run, 0 failures, 0 errors, 0 skipped**.
+- All changes remain unstaged and uncommitted on branch `feature/phase-2-financial-engine`.
+
+---
+
+## 8. Remediation of Security, Financial Integrity, and Documentation (Audit Remediation)
+
+### Context & Objectives
+An independent source-code audit identified remaining security boundaries and financial integrity gaps:
+1. **Critical Fix A — Privilege Escalation via User INSERT**: `ledgerline_runtime` possessed table-level `INSERT` on `users`, allowing potential direct insertion of `ADMIN` or `AUDITOR` roles bypassing registration logic.
+2. **Critical Fix B — Fabricated Opening Balances via Account INSERT**: Existing trigger guards only protected `UPDATE OF balance`. The runtime user possessed table-level `INSERT` on `accounts`, allowing potential creation of non-zero opening balances, arbitrary `SYSTEM` accounts, or `allow_negative=TRUE` accounts.
+3. **High Fix C — Database Role Security Verification**: Enforce `ALTER ROLE ledgerline_runtime NOINHERIT;`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC;`, and document actual role privileges and ownership tables.
+4. **Medium Fix D — Restrict Account & User Status Changes**: Verify ordinary users cannot mutate status or roles through APIs or repository methods.
+5. **Medium Fix E — Explicit Currency Validation**: Enforce pre-lock currency validation in `deposit`, `withdraw`, and `transfer` services.
+6. **Medium Fix F — Safe Exception Handling**: Prevent `ApiExceptionHandler` from returning `IllegalStateException` message bodies that leak database or schema internals; log details server-side via SLF4J.
+7. **Medium Fix G — Login Rate Limiter**: Align sliding window to 5 attempts per 15 minutes, implement access-ordered LRU eviction (`accessOrder = true`), and record `AUTH_RATE_LIMIT_EXCEEDED` audit logs on rate limit exhaustion.
+
+### Architectural Decisions & Implementation
+- **Migration V9 (`V9__prevent_privilege_escalation_and_balance_fabrication.sql`)**:
+  - `ALTER ROLE ledgerline_runtime NOINHERIT;`
+  - `REVOKE CREATE ON SCHEMA public FROM PUBLIC;`
+  - Installed `protect_user_role_assignment` trigger: when executed under runtime identity (`ledgerline_runtime`), any `INSERT` with `role <> 'CUSTOMER'` is aborted with PostgreSQL SQLState `42501`.
+  - Installed `protect_account_insertion` trigger: when executed under runtime identity, any `INSERT` on `accounts` is aborted with `42501` if `account_type <> 'CUSTOMER'`, `owner_user_id IS NULL`, `balance <> 0.00`, `normal_balance <> 'CREDIT'`, `allow_negative = TRUE`, or `currency <> 'INR'`.
+- **Sliding-Window LRU Rate Limiting (`LoginRateLimiter.java`, `AuthController.java`)**:
+  - Replaced arbitrary iterator key eviction with an access-ordered `LinkedHashMap` (`accessOrder = true`) bounded at 10,000 tracked keys.
+  - Default constructor configured to 5 attempts per 15 minutes (`Duration.ofMinutes(15)`).
+  - Wrapped `loginRateLimiter.acquireAttempt` in `AuthController.login()` to catch `RateLimitExceededException` and record an `AUTH_RATE_LIMIT_EXCEEDED` audit log via `auditService.recordEventRequiresNew`.
+- **Generic Exception Handling (`ApiExceptionHandler.java`)**:
+  - Added SLF4J logger to `ApiExceptionHandler`.
+  - Sanitized `IllegalStateException` and general `Exception` handlers to log diagnostics on the server while returning generic `{"error": "An internal error occurred. Please try again later."}` to clients.
+- **Pre-Lock Currency Validation (`TransactionService.java`)**:
+  - Added explicit currency validation in `deposit`, `withdraw`, and `transfer` verifying that account currencies and system counterpart currencies match the request currency *before* acquiring row-level locks.
+
+### Verification
+- **PostgreSQL Privilege Verification**:
+  - `pg_roles`: `ledgerline_runtime` has `rolsuper=f`, `rolinherit=f`, `rolcreaterole=f`, `rolcreatedb=f`.
+  - `pg_auth_members`: 0 rows (no role inheritance or memberships).
+  - `pg_tables`: all tables owned by `ledgerline_app`.
+  - `role_table_grants`: `ledgerline_runtime` has only `SELECT` and `INSERT` grants.
+  - `role_column_grants`: column-level `UPDATE` granted only on `(status, updated_at)` for `users` and `accounts`, and `(status, completed_at)` for `ledger_transactions`.
+  - `pg_namespace`: `public` schema has `CREATE` revoked from `PUBLIC` and `ledgerline_runtime`.
+- **Database Trigger Tests (`Phase2FinancialEngineIntegrationTests`)**:
+  - Direct SQL `INSERT INTO users (..., role) VALUES (..., 'ADMIN')` as `ledgerline_runtime` rejected with `42501`.
+  - Direct SQL `INSERT INTO users (..., role) VALUES (..., 'AUDITOR')` as `ledgerline_runtime` rejected with `42501`.
+  - Direct SQL `INSERT INTO accounts (..., balance) VALUES (..., 500.00)` as `ledgerline_runtime` rejected with `42501`.
+  - Direct SQL `INSERT INTO accounts (..., account_type) VALUES (..., 'SYSTEM')` as `ledgerline_runtime` rejected with `42501`.
+  - Direct SQL `INSERT INTO accounts (..., allow_negative) VALUES (..., TRUE)` as `ledgerline_runtime` rejected with `42501`.
+- **Rate Limiting & Audit Tests**:
+  - `LoginRateLimiterTest.lruEvictionPreservesRecentlyAccessedKeysAndEvictsEldest()`: verified access-ordered LRU eviction.
+  - `rateLimitExceededGeneratesAuditLog()`: verified database persistence of `AUTH_RATE_LIMIT_EXCEEDED`.
+- **Maven Test Suite**:
+  - Executed `.\backend\ledgerline\mvnw.cmd test`: **89 tests run, 0 failures, 0 errors, 0 skipped**.
+- All changes remain unstaged and uncommitted on branch `feature/phase-2-financial-engine`.

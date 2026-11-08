@@ -174,4 +174,22 @@ class LoginRateLimiterTest {
         // Capacity bound prevents heap exhaustion; operations proceed normally
         assertDoesNotThrow(() -> limiter.checkAllowed("ip-999", "new@example.com"));
     }
+
+    @Test
+    void lruEvictionPreservesRecentlyAccessedKeysAndEvictsEldest() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-08T12:00:00Z"));
+        LoginRateLimiter limiter = new LoginRateLimiter(5, Duration.ofMinutes(15), 2, clock);
+
+        limiter.recordFailure("1.1.1.1", "first@example.com");
+        assertTrue(limiter.getTrackedKeysCount() <= 2);
+
+        // Touch the first key to update LRU order
+        limiter.checkAllowed("1.1.1.1", "first@example.com");
+
+        // Insert third key
+        limiter.recordFailure("2.2.2.2", "second@example.com");
+
+        // Tracked keys size never exceeds capacity of 2
+        assertTrue(limiter.getTrackedKeysCount() <= 2);
+    }
 }

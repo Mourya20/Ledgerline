@@ -29,6 +29,11 @@ public class AuditService {
     public static final String ACTION_DISABLED_USER_ATTEMPT = "AUTH_DISABLED_USER_ATTEMPT";
     public static final String ACTION_RATE_LIMIT_EXCEEDED = "AUTH_RATE_LIMIT_EXCEEDED";
 
+    public static final String ACTION_ACCOUNT_CREATED = "ACCOUNT_CREATED";
+    public static final String ACTION_TRANSACTION_DEPOSIT = "TRANSACTION_DEPOSIT";
+    public static final String ACTION_TRANSACTION_WITHDRAW = "TRANSACTION_WITHDRAW";
+    public static final String ACTION_TRANSACTION_TRANSFER = "TRANSACTION_TRANSFER";
+
     private final AuditLogRepository auditLogRepository;
 
     public AuditService(AuditLogRepository auditLogRepository) {
