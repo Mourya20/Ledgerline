@@ -74,7 +74,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Severity**: High (Targeted account takeover, credential exposure)
 - **Attack Scenario**: An attacker uses automated tools (e.g., Hydra, Burp Intruder) to cycle through thousands of leaked credentials against `POST /api/v1/auth/login`. Because financial systems hold monetary assets, automated password guessing against high-value customer accounts or employee administrative accounts represents an active threat.
 - **Potential Impact**: Unauthorized account takeover, unauthorized access to customer account balances, transaction initiation (Phase 2), compliance penalties.
-- **Mitigation Strategy**: Multi-dimensional concurrency-safe rate limiting implemented in `LoginRateLimiter`. Login attempts are tracked per client IP and per normalized email over a sliding window (default 5 attempts per minute) using atomic reservation (`tryReserve` inside synchronized `compute`). Reaching the threshold immediately triggers HTTP 429 Too Many Requests with a `Retry-After` header indicating remaining seconds and records an `AUTH_RATE_LIMIT_EXCEEDED` audit log. When an email authenticates successfully, only its per-email counter is cleared; the shared IP counter is preserved so an attacker cannot cycle accounts from the same IP. Storage is bounded to 10,000 keys with LRU eviction and input key lengths are capped (IP 64 chars, email 255 chars) to prevent memory exhaustion DoS.
+- **Mitigation Strategy**: Multi-dimensional concurrency-safe rate limiting implemented in `LoginRateLimiter`. Login attempts are tracked per client IP and per normalized email over a sliding window (default 5 attempts per 15 minutes) using atomic reservation (`tryReserve` inside synchronized block). Reaching the threshold immediately triggers HTTP 429 Too Many Requests with a `Retry-After` header indicating remaining seconds and records an `AUTH_RATE_LIMIT_EXCEEDED` audit log. When an email authenticates successfully, only its per-email counter is cleared; the shared IP counter is preserved so an attacker cannot cycle accounts from the same IP. Storage is bounded to 10,000 keys with access-ordered LRU eviction (`accessOrder = true`) and input key lengths are capped (IP 64 chars, email 255 chars) to prevent memory exhaustion DoS.
 - **Implementation Evidence**: 
   - `backend/ledgerline/src/main/java/com/ledgerline/auth/LoginRateLimiter.java`
   - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 71-77)
@@ -186,11 +186,13 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Severe privacy breach, regulatory non-compliance (GLBA, GDPR), unauthorized fund transfer.
 - **Mitigation Strategy**: The domain model binds each `CUSTOMER` account to an explicit `user_id` foreign key (`AccountEntity.user`). In Phase 1, `AccountEntity` explicitly models ownership. Account queries enforce user ownership filtering. Phase 2 transfer services enforce ownership checks in `@PreAuthorize` and repository queries (`findByAccountNumberAndUserId`).
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`accounts.user_id` FK)
+  - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`accounts.owner_user_id` FK)
   - `backend/ledgerline/src/main/java/com/ledgerline/domain/AccountEntity.java`
-- **Verification**: `Phase1IntegrationTests.publicRegistrationCreatesCustomerRoleOnly()`
-- **Status**: MITIGATED (Schema & Entity ownership in Phase 1; Endpoint enforcement in Phase 2)
-- **Residual Risk**: Transaction and account endpoints are not yet exposed in Phase 1; Phase 2 endpoints must implement strict ownership assertions.
+  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (`resolveCustomerAccount` ownership check)
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`resolveCustomerAccount` ownership check)
+- **Verification**: `Phase1IntegrationTests.publicRegistrationCreatesCustomerRoleOnly()`, `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`
+- **Status**: MITIGATED
+- **Residual Risk**: Any newly added endpoints must continue to pass authenticated principal identity directly into service-layer ownership resolvers.
 
 ---
 
@@ -301,9 +303,11 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
      Any concurrent attempt to debit the account below zero causes the second transaction to abort with a check constraint violation.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V5__remediate_accounting_model_and_ledger_integrity.sql` (lines 43-47, 72-78)
-- **Verification**: `Phase1IntegrationTests.customerAccountCannotBecomeNegative()`
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder` row locking, post-lock balance validation)
+  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java` (`findByIdForUpdate` with `@Lock(LockModeType.PESSIMISTIC_WRITE)`)
+- **Verification**: `Phase1IntegrationTests.customerAccountCannotBecomeNegative()`, `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentWithdrawalsPreventOverdraft()`
 - **Status**: MITIGATED
-- **Residual Risk**: High concurrency on a single hot account can cause database lock contention. Mitigated in Phase 2 with backoff retry handling.
+- **Residual Risk**: High concurrency on a single hot account serializes requests at the database level. Application backpressure and transaction timeouts ensure connections return cleanly.
 
 ---
 
@@ -608,6 +612,302 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 
 ---
 
+### Category F: Financial Transaction Engine & Money Movement (Phase 2)
+
+#### SEC-TX-001: Concurrent Double-Spending & Overdraft Race Condition
+- **Threat ID**: `SEC-TX-001`
+- **Name**: Simultaneous Withdrawal Race Condition Exceeding Available Balance
+- **Category**: Financial Transaction Engine
+- **Severity**: Critical (Direct financial loss, customer overdraft)
+- **Attack Scenario**: A customer with an available balance of ₹1,000 issues two concurrent withdrawal requests for ₹800 within milliseconds of each other. If both execution threads read the balance simultaneously before either applies a debit, both withdrawals succeed, overdrafting the account to -₹600.
+- **Potential Impact**: Unauthorized credit exposure, negative customer liability balances, direct monetary theft.
+- **Mitigation Strategy**: Multi-layered defense:
+  1. `TransactionService` acquires a pessimistic row-level write lock (`findByIdForUpdate` executing `SELECT ... FOR UPDATE`) on the account.
+  2. The account balance is strictly validated **after** acquiring the row lock; if `balance < amount`, `InsufficientFundsException` is thrown (HTTP 422 Unprocessable Content).
+  3. PostgreSQL check constraint `accounts_customer_policy_chk` guarantees that customer accounts (`account_type = 'CUSTOMER'`) can never have a negative balance (`balance >= 0`). Any transaction that attempts to drive the balance below zero is immediately aborted by PostgreSQL.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder`, balance validation under lock)
+  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java` (`findByIdForUpdate`)
+  - `backend/ledgerline/src/main/resources/db/migration/V5__remediate_accounting_model_and_ledger_integrity.sql`
+- **Verification**: `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentWithdrawalsPreventOverdraft()` (2 concurrent threads requesting ₹800 against ₹1,000 -> exactly 1 succeeds, 1 rejected with 422, final balance ₹200).
+- **Status**: MITIGATED
+- **Residual Risk**: High concurrency on a single hot account serializes at the row level; backpressure should be monitored under extreme load.
+
+---
+
+#### SEC-TX-002: Bilateral Transfer Deadlock under High Concurrency
+- **Threat ID**: `SEC-TX-002`
+- **Name**: Database Deadlock during Simultaneous Opposing Transfers
+- **Category**: Financial Transaction Engine
+- **Severity**: High (Denial of service, transaction failure under load)
+- **Attack Scenario**: Customer A transfers money to Customer B while Customer B simultaneously transfers money to Customer A. If Thread 1 locks Account A first then attempts to lock Account B, while Thread 2 locks Account B first then attempts to lock Account A, a classical cyclic deadlock occurs in PostgreSQL.
+- **Potential Impact**: Database serialization failures, 500 internal server errors, connection pool exhaustion.
+- **Mitigation Strategy**: Deterministic natural UUID order locking in `TransactionService.lockAccountsInDeterministicOrder(...)`. All involved accounts are sorted in natural UUID order before issuing `SELECT ... FOR UPDATE`. Both threads always request lock A before lock B (or vice versa), eliminating circular wait conditions.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 385-392)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentTransfersInOppositeDirectionsPreventDeadlock()` (Parallel opposing transfers across 10 threads complete with 0 deadlocks and exact balance preservation).
+- **Status**: MITIGATED
+- **Residual Risk**: None for bilateral transfers. Multi-account split transfers in future phases must adhere to the same sorted lock acquisition protocol.
+
+---
+
+#### SEC-TX-003: Duplicate Request Ingestion & Idempotency Replay
+- **Threat ID**: `SEC-TX-003`
+- **Name**: Network Retry Duplicate Execution / Double Movement
+- **Category**: Financial Transaction Engine
+- **Severity**: Critical (Double debiting or double crediting of accounts)
+- **Attack Scenario**: A mobile client or API consumer initiates a transfer of ₹500, but a transient network timeout causes the client to resend the exact same request. Without idempotency enforcement, the transfer is executed a second time, moving an additional ₹500.
+- **Potential Impact**: Duplicate financial transactions, customer disputes, unapproved balance changes.
+- **Mitigation Strategy**:
+  1. Mandatory `Idempotency-Key` request header on all mutating financial endpoints.
+  2. SHA-256 request payload fingerprinting computed over transaction type, account IDs, amount, and currency.
+  3. Pre-execution check against `ledger_transactions` for existing completed transactions with the same `(user_id, idempotency_key)`.
+  4. Post-lock re-check: When two identical requests race simultaneously, the second thread waits on the account row lock, wakes up after the first commits, detects the newly committed transaction, and returns the original result without executing duplicate ledger entries.
+  5. Composite database unique index `ledger_transactions_idempotency_uidx` on `(initiated_by_user_id, idempotency_key)` preventing duplicate inserts at the database layer.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`checkExistingIdempotentTransaction`, post-lock re-check)
+  - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`ledger_transactions_idempotency_uidx`)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameKeySamePayloadReturnsOriginalResult()`, `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentDuplicateRequestsExecuteOnlyOnce()`
+- **Status**: MITIGATED
+- **Residual Risk**: Idempotency records are retained indefinitely; future phases may implement key expiration policies after statutory financial periods.
+
+---
+
+#### SEC-TX-004: Idempotency Key Reuse Conflict & Request Hijacking
+- **Threat ID**: `SEC-TX-004`
+- **Name**: Reusing an Idempotency Key with a Mutated Payload
+- **Category**: Financial Transaction Engine
+- **Severity**: High (Request tampering, payload confusion)
+- **Attack Scenario**: An attacker or misbehaved client reuses a previously generated idempotency key but alters the amount, destination account, or currency. If the system blindly returned the prior result or executed the new payload under the old key, auditing and ledger traceability would be compromised.
+- **Potential Impact**: Ambiguous transaction records, silent payload corruption.
+- **Mitigation Strategy**: Strict SHA-256 fingerprint comparison. When an existing idempotency key is detected, the incoming fingerprint is compared with the stored `request_fingerprint`. If they do not match, `IdempotencyConflictException` is thrown, returning HTTP 409 Conflict with zero balance modification.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 398-403)
+  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java` (HTTP 409 mapping)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameKeyDifferentPayloadReturnsConflict()`
+- **Status**: MITIGATED
+- **Residual Risk**: None. Reusing keys across different operations is strictly blocked.
+
+---
+
+#### SEC-TX-005: Insecure Direct Object Reference (IDOR) on Financial Operations
+- **Threat ID**: `SEC-TX-005`
+- **Name**: Cross-Customer Account Debit/Withdrawal/Lookup IDOR
+- **Category**: Financial Transaction Engine
+- **Severity**: Critical (Unauthorized withdrawal from other customers' accounts)
+- **Attack Scenario**: Customer A discovers Customer B's account UUID and attempts to submit a deposit, withdrawal, or transfer using Customer B's account ID as the source, or query Customer B's account balance directly.
+- **Potential Impact**: Embezzlement from peer accounts, violation of financial privacy.
+- **Mitigation Strategy**: Server-side principal resolution and explicit ownership verification in `resolveCustomerAccount(accountId, userId)`. Every financial service checks `account.getOwner().getId().equals(authenticatedUser.getId())`. If ownership does not match, `AccountAccessDeniedException` is thrown, returning HTTP 403 Forbidden.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (lines 90-100)
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 430-438)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`
+- **Status**: MITIGATED
+- **Residual Risk**: None. All account resolutions are validated against the authenticated Spring Security principal.
+
+---
+
+#### SEC-TX-006: System Cash Vault Extraction & Direct Injection
+- **Threat ID**: `SEC-TX-006`
+- **Name**: Customer Access or Direct Transfer to System Asset Accounts
+- **Category**: Financial Transaction Engine
+- **Severity**: Critical (Direct bank reserve drainage, ledger distortion)
+- **Attack Scenario**: A customer attempts to query the internal cash vault (`SYS-INR-CASH-VAULT-001`), deposit directly into it, or transfer money directly into the system vault account.
+- **Potential Impact**: Distorted bank asset balance sheet, unauthorized view of bank reserves.
+- **Mitigation Strategy**: Explicit `AccountType.SYSTEM` checks in both `AccountService` and `TransactionService`. Any attempt by a customer to access an account with `account_type = 'SYSTEM'` or initiate a transfer with a destination system account immediately throws `SystemAccountAccessException`, returning HTTP 403 Forbidden. System accounts are strictly operational counterparts invoked server-side.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (lines 93-95)
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 261-263, 428-430)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessSystemAccount()`, `Phase2FinancialEngineIntegrationTests$TransferTests.transferToSystemAccountIsRejected()`
+- **Status**: MITIGATED
+- **Residual Risk**: None. System accounts are unreachable via customer-facing APIs.
+
+---
+
+#### SEC-TX-007: Circular Self-Transfers
+- **Threat ID**: `SEC-TX-007`
+- **Name**: Internal Self-Transfer Velocity Exploits
+- **Category**: Financial Transaction Engine
+- **Severity**: Low (Unnecessary ledger bloat, velocity filter evasion)
+- **Attack Scenario**: A customer submits a transfer with identical source and destination accounts to generate artificial transaction volume.
+- **Potential Impact**: Audit log pollution, wasted database storage.
+- **Mitigation Strategy**: Service-level assertion `sourceAccount.getId().equals(destinationAccount.getId())` throwing `SelfTransferException`, returning HTTP 400 Bad Request.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 265-267)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$TransferTests.selfTransferIsRejected()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-TX-008: AUDITOR Privilege Escalation to Money Movement
+- **Threat ID**: `SEC-TX-008`
+- **Name**: Regulatory AUDITOR User Initiating Financial Transactions
+- **Category**: Financial Transaction Engine
+- **Severity**: High (Violation of regulatory segregation of duties)
+- **Attack Scenario**: A user possessing the `AUDITOR` role attempts to call `POST /api/v1/transactions/deposit`, `POST /api/v1/transactions/withdraw`, or `POST /api/v1/transactions/transfer` to move funds.
+- **Potential Impact**: Regulatory compliance violation, unauthorized money movement.
+- **Mitigation Strategy**: Explicit method-level URL protection in `SecurityConfig`. `POST /api/v1/transactions/**` and `POST /api/v1/accounts/**` are strictly restricted to `hasAnyRole('CUSTOMER', 'ADMIN')`. Any request by an `AUDITOR` is rejected with HTTP 403 Forbidden.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java` (lines 38-42)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests.auditorCannotInitiateMoneyMovement()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+### Category E: Database Privilege, Idempotency & Privacy Hardening (Phase 2 Remediation)
+
+#### SEC-DB-005: Runtime Database Privilege Abuse & TRUNCATE Destruction
+- **Threat ID**: `SEC-DB-005`
+- **Name**: Table Truncation and Data Destruction via Runtime Application Role
+- **Category**: Database Security
+- **Severity**: Critical (Irreversible data loss)
+- **Attack Scenario**: If an attacker exploits an application-level vulnerability (e.g. SQL injection or remote code execution), having `TRUNCATE` or unrestricted `DELETE` privileges granted to `ledgerline_runtime` would allow wiping the general ledger, audit trails, and accounts table.
+- **Potential Impact**: Complete catastrophic loss of transaction history and audit evidence.
+- **Mitigation Strategy**: Flyway migration `V8__harden_runtime_database_privileges.sql` revokes `TRUNCATE` across all schema tables from `ledgerline_runtime`, revokes `DELETE` across all tables, and revokes `CREATE` on schema `public`.
+- **Implementation Evidence**: `backend/ledgerline/src/main/resources/db/migration/V8__harden_runtime_database_privileges.sql` (lines 4-13)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests.runtimeRoleCannotTruncateTables()`
+- **Status**: MITIGATED
+- **Residual Risk**: Database administrator (`ledgerline_app`) credentials must remain tightly guarded.
+
+---
+
+#### SEC-DB-006: Direct Privilege Escalation via User Table UPDATE
+- **Threat ID**: `SEC-DB-006`
+- **Name**: User Role Escalation & Direct Password Tampering via Application Connection
+- **Category**: Database Security / Authorization
+- **Severity**: Critical (Administrative takeover)
+- **Attack Scenario**: If the runtime application role has unrestricted `UPDATE` access to the `users` table, a query injection or malicious service could execute `UPDATE users SET role = 'ADMIN'` or directly replace `password_hash`.
+- **Potential Impact**: Full administrative takeover bypassing Java-level RBAC and BCrypt verification.
+- **Mitigation Strategy**: Migration `V8` revokes table-level `UPDATE` on `users` and grants column-level `UPDATE` strictly on `(status, updated_at)`. The runtime user cannot modify `role`, `password_hash`, `email`, or `id`.
+- **Implementation Evidence**: `V8__harden_runtime_database_privileges.sql` (lines 14-19)
+- **Verification**: `runtimeRoleCannotPromoteUserRole()`, `runtimeRoleCannotModifyPasswordHash()`
+- **Status**: MITIGATED
+- **Residual Risk**: None through application connection.
+
+---
+
+#### SEC-DB-007: Overdraft Policy Manipulation via `allow_negative`
+- **Threat ID**: `SEC-DB-007`
+- **Name**: Customer Overdraft Authorization via `allow_negative` Tampering
+- **Category**: Financial Security
+- **Severity**: High (Unauthorized credit creation)
+- **Attack Scenario**: If `ledgerline_runtime` has permission to update `accounts.allow_negative`, an attacker could enable negative balances for an arbitrary customer account, subverting the non-negative balance trigger check.
+- **Potential Impact**: Unauthorized money creation and extraction.
+- **Mitigation Strategy**: Migration `V8` revokes `UPDATE (allow_negative)` from `ledgerline_runtime`, restricting account updates exclusively to `(status, updated_at)`.
+- **Implementation Evidence**: `V8__harden_runtime_database_privileges.sql` (lines 20-26)
+- **Verification**: `runtimeRoleCannotModifyAllowNegativeOrBalance()`
+- **Status**: MITIGATED
+- **Residual Risk**: None through runtime application connection.
+
+---
+
+#### SEC-DB-008: Privilege Escalation via User Table Direct INSERT
+- **Threat ID**: `SEC-DB-008`
+- **Name**: Administrative Privilege Escalation via Direct User Insertion
+- **Category**: Database Security / Authorization Boundary
+- **Severity**: Critical (Full administrative privilege escalation)
+- **Attack Scenario**: Even though `UPDATE` on `users.role` is revoked in V8, the runtime database role (`ledgerline_runtime`) had unrestricted `INSERT` permissions on `users`. An attacker with direct database access or SQL injection could insert a new user row with `role = 'ADMIN'` or `role = 'AUDITOR'`, bypassing application-level registration controls.
+- **Potential Impact**: Complete administrative compromise and bypass of application role barriers.
+- **Mitigation Strategy**: Flyway migration `V9__prevent_privilege_escalation_and_balance_fabrication.sql` installs trigger `trg_protect_user_role_assignment`. Whenever `CURRENT_USER` or `SESSION_USER` is `ledgerline_runtime`, any `INSERT` with `role <> 'CUSTOMER'` is rejected with PostgreSQL permission error code `42501`.
+- **Implementation Evidence**: `V9__prevent_privilege_escalation_and_balance_fabrication.sql` (lines 9-27)
+- **Verification**: `runtimeRoleCannotInsertAdminOrAuditorRole()` (verifies 42501 for ADMIN and AUDITOR, allows CUSTOMER)
+- **Status**: MITIGATED
+- **Residual Risk**: None through application connection.
+
+---
+
+#### SEC-DB-009: Opening Balance Fabrication and Unauthorized SYSTEM Accounts via INSERT
+- **Threat ID**: `SEC-DB-009`
+- **Name**: Balance Fabrication and SYSTEM Account Injection via Direct Account Insertion
+- **Category**: Financial Integrity / Accounting Invariants
+- **Severity**: Critical (Unauthorized money creation)
+- **Attack Scenario**: The balance protection trigger only protected `UPDATE OF balance`. The runtime database role has `INSERT` on `accounts`. An attacker could insert an account with a non-zero opening balance (e.g. `balance = 1000000.00`), create unbacked `SYSTEM` accounts, or insert accounts with `allow_negative = TRUE`.
+- **Potential Impact**: Counterfeit opening balances created without corresponding ledger double-entries, bypassing zero-sum ledger invariants.
+- **Mitigation Strategy**: Flyway migration `V9__prevent_privilege_escalation_and_balance_fabrication.sql` installs trigger `trg_protect_account_insertion`. Whenever `CURRENT_USER` or `SESSION_USER` is `ledgerline_runtime`, any `INSERT` on `accounts` is strictly validated: `account_type` must be `'CUSTOMER'`, `owner_user_id` cannot be null, initial `balance` must be `0.00`, `normal_balance` must be `'CREDIT'`, `allow_negative` must be `FALSE`, and `currency` must be `'INR'`. Violations raise PostgreSQL error `42501`.
+- **Implementation Evidence**: `V9__prevent_privilege_escalation_and_balance_fabrication.sql` (lines 30-74)
+- **Verification**: `runtimeRoleCannotInsertFabricatedBalanceOrSystemAccount()`
+- **Status**: MITIGATED
+- **Residual Risk**: None through application connection.
+
+---
+
+#### SEC-IDEM-005: Cross-Account Concurrent Idempotency Race Conditions
+- **Threat ID**: `SEC-IDEM-005`
+- **Name**: Cross-Account Parallel Double Spending with Identical Idempotency Key
+- **Category**: Financial Engine / Concurrency
+- **Severity**: Critical (Double spending)
+- **Attack Scenario**: A user rapidly submits two simultaneous requests with the same `Idempotency-Key` targeting two *different* accounts owned by that user (e.g. Deposit to Account A, Deposit to Account B). Because account-level row locks lock different rows, both threads could check idempotency before either inserts a transaction, causing both to execute.
+- **Potential Impact**: Double crediting or double money movement with a single idempotency key.
+- **Mitigation Strategy**: PostgreSQL transaction-scoped advisory locking (`pg_advisory_xact_lock`) keyed by a 64-bit hash of `authenticated_user_id + ":" + normalized_idempotency_key`. The advisory lock is acquired inside the transaction before any account lookup or locking. The second request blocks on the advisory lock; once the first commits, the second discovers the existing transaction and rejects the differing payload with HTTP 409 Conflict.
+- **Implementation Evidence**: `TransactionService.java` (`acquireIdempotencyAdvisoryLock`, `computeAdvisoryLockKey`)
+- **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameUserSameKeyAcrossDifferentAccountsProducesOneOperation()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-IDEM-006: Aborted Transaction Rollback Recovery Poisoning
+- **Threat ID**: `SEC-IDEM-006`
+- **Name**: Broken Idempotency Recovery in Aborted PostgreSQL Transactions
+- **Category**: Financial Engine / Database Integrity
+- **Severity**: High (Server 500 errors, broken idempotent retries)
+- **Attack Scenario**: In PostgreSQL, catching a unique-constraint violation (`DataIntegrityViolationException`) inside an active transaction leaves the transaction in an aborted state. Attempting a subsequent query (`findByInitiatedByUserIdAndIdempotencyKey`) within the same aborted transaction causes PostgreSQL to fail with `current transaction is aborted, commands ignored until end of transaction block`.
+- **Potential Impact**: Unhandled server errors, failure to return the existing idempotent transaction.
+- **Mitigation Strategy**: Advisory locking serializes identical concurrent requests upfront, preventing concurrent constraint violations entirely. In the event of any unexpected constraint violation, the transaction rolls back cleanly without issuing secondary queries in the aborted context.
+- **Implementation Evidence**: `TransactionService.java` (advisory locking pre-reservation, removed post-collision query)
+- **Verification**: `sameKeySamePayloadReturnsOriginalResult()`, `concurrentDuplicateRequestsExecuteOnlyOnce()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-SYS-002: Arbitrary System Counterpart Account Resolution
+- **Threat ID**: `SEC-SYS-002`
+- **Name**: Unauthorized System Counterpart Selection & Inversion
+- **Category**: Financial Integrity
+- **Severity**: High (Misallocation of system assets)
+- **Attack Scenario**: If system counterpart resolution falls back to an arbitrary `SYSTEM` account of the same currency, or uses a system account with inverted normal balance (`CREDIT`), incorrect currency, or `allow_negative=true`, deposits and withdrawals could miscalculate bank assets or deplete unauthorized reserves.
+- **Potential Impact**: General ledger corruption, miscalculated bank reserves.
+- **Mitigation Strategy**: `TransactionService.resolveSystemCounterpartAccount()` strictly requires canonical `SYS-{currency}-CASH-VAULT-001`, eliminates arbitrary fallback selection, and verifies that the resolved account is `SYSTEM`, has `owner == null`, currency matches, `normal_balance == DEBIT`, `status == ACTIVE`, and `allow_negative == false`.
+- **Implementation Evidence**: `TransactionService.java` (`resolveSystemCounterpartAccount`)
+- **Verification**: `depositFailsIfSystemAccountMisconfigured()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-PRIV-002: System Cash Vault UUID & Counterpart Account Privacy Leakage
+- **Threat ID**: `SEC-PRIV-002`
+- **Name**: Internal System Identifier and Counterpart Account Number Disclosure
+- **Category**: Data Privacy
+- **Severity**: Medium (Internal infrastructure enumeration, customer privacy violation)
+- **Attack Scenario**: Returning raw ledger entries exposes the internal UUID and full account number of the system cash vault, as well as the full account number and UUID of peer customers in transfers.
+- **Potential Impact**: Unintended disclosure of counterpart account identifiers and system architecture.
+- **Mitigation Strategy**: Viewer-aware DTO mapping in `TransactionEntryResponse.fromEntity(entry, viewerUserId)`. For system accounts, `accountId` is `null` and `accountNumber` is masked as `"Cash/Bank Counterpart"`. For peer customers, `accountId` is `null` and `accountNumber` is masked as `"****1234"`. Customer-facing `AccountResponse` also strips `normalBalance`.
+- **Implementation Evidence**: `TransactionEntryResponse.java`, `AccountResponse.java`
+- **Verification**: `depositResponseMasksSystemCounterpart()`, `transferResponseMasksCounterpartForSenderAndReceiver()`, `accountResponseDoesNotExposeNormalBalance()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-CFG-002: Hardcoded Database Credentials & Lack of Separation
+- **Threat ID**: `SEC-CFG-002`
+- **Name**: Hardcoded Fallback Database Passwords in Configuration Files
+- **Category**: Configuration Security
+- **Severity**: High (Credential leakage)
+- **Attack Scenario**: Configuration files committing default fallback passwords allow attackers gaining read access to the source code to authenticate against databases using default credentials.
+- **Potential Impact**: Unauthorized database access.
+- **Mitigation Strategy**: Removed all hardcoded fallback passwords from `application.properties` and `application-test.properties`. Configured mandatory environment variables `APP_DB_*` for runtime JPA and `FLYWAY_DB_*` for schema migrations.
+- **Implementation Evidence**: `application.properties`, `application-test.properties`, `.env.example`
+- **Verification**: Tested runtime application startup and test suite execution with environment variables.
+- **Status**: MITIGATED
+- **Residual Risk**: `.env` file must be kept in `.gitignore` and excluded from repository commits.
+
+---
+
 ## 3. Threat-to-Control Traceability Matrix
 
 | Threat ID | Name | Category | Severity | Status | Mitigating Component | Test Verification |
@@ -640,8 +940,24 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 | `SEC-APP-002` | Insecure Mass Assignment | Application | High | MITIGATED | Strict Request Records (`RegisterRequest`) | `publicRegistrationCreatesCustomerRoleOnly` |
 | `SEC-APP-003` | Credential Leakage in Audit Logs | Application | High | MITIGATED | Sanitized `AuditService` Metadata Builder | `authenticationAuditLogsPersistCorrectly` |
 | `SEC-APP-004` | Password Hash Exposure in Audit API | Application | Critical | MITIGATED | `AuditLogResponse` DTO with pagination | `auditLogsEndpointDoesNotExposePasswordHash` |
-
-*\* Note on SEC-AUTHZ-001: Phase 1 establishes the schema and JPA entity ownership models. Endpoint-level IDOR enforcement will be exercised in Phase 2 when account and transaction REST resources are introduced.*
+| `SEC-TX-001` | Concurrent Overdraft Race Condition | Financial Engine | Critical | MITIGATED | Deterministic `FOR UPDATE` lock, balance validation | `concurrentWithdrawalsPreventOverdraft` |
+| `SEC-TX-002` | Bilateral Transfer Deadlock | Financial Engine | High | MITIGATED | Natural UUID sorted lock acquisition | `concurrentTransfersInOppositeDirectionsPreventDeadlock` |
+| `SEC-TX-003` | Duplicate Request Replay | Financial Engine | Critical | MITIGATED | `Idempotency-Key`, SHA-256 fingerprint, post-lock re-check | `concurrentDuplicateRequestsExecuteOnlyOnce` |
+| `SEC-TX-004` | Idempotency Key Reuse Conflict | Financial Engine | High | MITIGATED | Payload fingerprint matching, HTTP 409 Conflict | `sameKeyDifferentPayloadReturnsConflict` |
+| `SEC-TX-005` | Financial IDOR / Account Hijacking | Financial Engine | Critical | MITIGATED | Server-side principal ownership assertion | `customerCannotAccessAnotherCustomerAccount` |
+| `SEC-TX-006` | System Cash Vault Extraction | Financial Engine | Critical | MITIGATED | System account type isolation, HTTP 403 | `customerCannotAccessSystemAccount` |
+| `SEC-TX-007` | Circular Self-Transfer | Financial Engine | Low | MITIGATED | Source == Destination validation, HTTP 400 | `selfTransferIsRejected` |
+| `SEC-TX-008` | AUDITOR Money Movement Escalation | Financial Engine | High | MITIGATED | Method-level RBAC (`hasAnyRole('CUSTOMER', 'ADMIN')`) | `auditorCannotInitiateMoneyMovement` |
+| `SEC-DB-005` | Table Truncation & Destruction | Database | Critical | MITIGATED | Flyway V8 `REVOKE TRUNCATE, DELETE` from runtime role | `runtimeRoleCannotTruncateTables` |
+| `SEC-DB-006` | User Role & Password Tampering | Database | Critical | MITIGATED | Flyway V8 column-restricted UPDATE `(status, updated_at)` | `runtimeRoleCannotPromoteUserRole`, `runtimeRoleCannotModifyPasswordHash` |
+| `SEC-DB-007` | Negative Policy Tampering | Financial | High | MITIGATED | Flyway V8 revoked `UPDATE (allow_negative)` | `runtimeRoleCannotModifyAllowNegativeOrBalance` |
+| `SEC-DB-008` | User INSERT Privilege Escalation | Database | Critical | MITIGATED | Flyway V9 trigger `trg_protect_user_role_assignment` | `runtimeRoleCannotInsertAdminOrAuditorRole` |
+| `SEC-DB-009` | Opening Balance Fabrication | Financial | Critical | MITIGATED | Flyway V9 trigger `trg_protect_account_insertion` | `runtimeRoleCannotInsertFabricatedBalanceOrSystemAccount` |
+| `SEC-IDEM-005` | Cross-Account Idempotency Race | Financial Engine | Critical | MITIGATED | PostgreSQL advisory lock `pg_advisory_xact_lock` on user+key | `sameUserSameKeyAcrossDifferentAccountsProducesOneOperation` |
+| `SEC-IDEM-006` | Aborted Transaction Recovery | Financial Engine | High | MITIGATED | Advisory locking upfront, clean rollback | `sameKeySamePayloadReturnsOriginalResult` |
+| `SEC-SYS-002` | Arbitrary System Account Misuse | Financial Integrity | High | MITIGATED | Strict validation of canonical `SYS-INR-CASH-VAULT-001` | `depositFailsIfSystemAccountMisconfigured` |
+| `SEC-PRIV-002` | Counterpart Privacy Leakage | Data Privacy | Medium | MITIGATED | Viewer-aware DTO masking (`****1234`, null UUIDs) | `transferResponseMasksCounterpartForSenderAndReceiver` |
+| `SEC-CFG-002` | Hardcoded Fallback Credentials | Configuration | High | MITIGATED | Removed fallback passwords, separate `APP_DB_*` and `FLYWAY_DB_*` | Verified runtime & migration startup |
 
 ---
 

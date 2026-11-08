@@ -58,6 +58,36 @@ public class LedgerEntryEntity {
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public LedgerTransactionEntity getTransaction() {
+        return transaction;
+    }
+
+    public AccountEntity getAccount() {
+        return account;
+    }
+
+    public EntryType getEntryType() {
+        return entryType;
+    }
+
+    public BigDecimal getAmount() {
+        return amount;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 }

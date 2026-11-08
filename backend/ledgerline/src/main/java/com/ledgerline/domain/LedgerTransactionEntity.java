@@ -63,11 +63,17 @@ public class LedgerTransactionEntity {
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
     }
 
     public UUID getId() {
         return id;
+    }
+
+    public String getTransactionType() {
+        return transactionType;
     }
 
     public TransactionStatus getStatus() {
@@ -76,8 +82,32 @@ public class LedgerTransactionEntity {
 
     public void setStatus(TransactionStatus status) {
         this.status = status;
-        if (status == TransactionStatus.COMPLETED) {
+        if (status == TransactionStatus.COMPLETED && this.completedAt == null) {
             this.completedAt = Instant.now();
         }
+    }
+
+    public UserEntity getInitiatedByUser() {
+        return initiatedByUser;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public String getRequestFingerprint() {
+        return requestFingerprint;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
     }
 }

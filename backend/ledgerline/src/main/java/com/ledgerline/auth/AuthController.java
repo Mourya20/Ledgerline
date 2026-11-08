@@ -76,7 +76,13 @@ public class AuthController {
             clientIp = "unknown";
         }
 
-        loginRateLimiter.acquireAttempt(clientIp, request.email());
+        try {
+            loginRateLimiter.acquireAttempt(clientIp, request.email());
+        } catch (RateLimitExceededException ex) {
+            auditService.recordEventRequiresNew(null, AuditService.ACTION_RATE_LIMIT_EXCEEDED, "USER", null,
+                    Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp, "retryAfterSeconds", ex.getRetryAfterSeconds()));
+            throw ex;
+        }
 
         Authentication authentication;
         try {
