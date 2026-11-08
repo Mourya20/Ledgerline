@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: ledgerline-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ledgerline_db
+      POSTGRES_USER: ledgerline_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ledgerline_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerline_app -d ledgerline_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ledgerline_data:
