@@ -81,6 +81,7 @@ public class AccountEntity {
 
     @PrePersist
     void onCreate() {
+        validateOwnership();
         Instant now = Instant.now();
         createdAt = now;
         updatedAt = now;
@@ -88,7 +89,17 @@ public class AccountEntity {
 
     @PreUpdate
     void onUpdate() {
+        validateOwnership();
         updatedAt = Instant.now();
+    }
+
+    private void validateOwnership() {
+        if (accountType == AccountType.CUSTOMER && owner == null) {
+            throw new IllegalStateException("Customer accounts must have an owner");
+        }
+        if (accountType == AccountType.SYSTEM && owner != null) {
+            throw new IllegalStateException("System accounts must not have a customer owner");
+        }
     }
 
     public UUID getId() {

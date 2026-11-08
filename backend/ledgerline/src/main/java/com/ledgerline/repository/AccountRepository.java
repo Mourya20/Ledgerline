@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.ledgerline.domain.AccountEntity;
 
-public interface AccountRepository extends JpaRepository<AccountEntity, UUID>, AccountRepositoryCustom {
+public interface AccountRepository extends JpaRepository<AccountEntity, UUID> {
 
     List<AccountEntity> findAllByOwnerId(UUID ownerId);
 
