@@ -76,13 +76,12 @@ public class AuthController {
             clientIp = "unknown";
         }
 
-        loginRateLimiter.checkAllowed(clientIp, request.email());
+        loginRateLimiter.acquireAttempt(clientIp, request.email());
 
         Authentication authentication;
         try {
             authentication = authService.authenticate(request);
         } catch (DisabledException ex) {
-            loginRateLimiter.recordFailure(clientIp, request.email());
             String finalIp = clientIp;
             userRepository.findByEmailIgnoreCase(request.email()).ifPresent(u -> {
                 auditService.recordEventRequiresNew(u, AuditService.ACTION_DISABLED_USER_ATTEMPT, "USER", u.getId(),
@@ -90,12 +89,10 @@ public class AuthController {
             });
             throw ex;
         } catch (BadCredentialsException ex) {
-            loginRateLimiter.recordFailure(clientIp, request.email());
             auditService.recordEventRequiresNew(null, AuditService.ACTION_LOGIN_FAILURE, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp));
             throw ex;
         } catch (Exception ex) {
-            loginRateLimiter.recordFailure(clientIp, request.email());
             auditService.recordEventRequiresNew(null, AuditService.ACTION_LOGIN_FAILURE, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp));
             throw ex;

@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Component;
 
@@ -31,47 +32,61 @@ public class LoginRateLimiter {
         this.clock = clock;
     }
 
+    /**
+     * Atomically checks limits and reserves an attempt for both the client IP and the email identifier.
+     * Throws RateLimitExceededException if either IP or identifier threshold is exceeded.
+     */
+    public void acquireAttempt(String ip, String email) {
+        Instant now = clock.instant();
+        String ipKey = toIpKey(ip);
+        String emailKey = toEmailKey(email);
+
+        long ipRetry = tryReserve(ipKey, now);
+        if (ipRetry > 0) {
+            throw new RateLimitExceededException("Too many login attempts. Please try again later.", ipRetry);
+        }
+
+        long emailRetry = tryReserve(emailKey, now);
+        if (emailRetry > 0) {
+            rollbackAttempt(ipKey, now);
+            throw new RateLimitExceededException("Too many login attempts. Please try again later.", emailRetry);
+        }
+    }
+
     public void checkAllowed(String ip, String email) {
         Instant now = clock.instant();
         String ipKey = toIpKey(ip);
         String emailKey = toEmailKey(email);
 
-        if (isExceeded(ipKey, now) || isExceeded(emailKey, now)) {
-            throw new RateLimitExceededException("Too many login attempts. Please try again later.");
+        long ipRetry = getRetryAfterSecondsIfExceeded(ipKey, now);
+        if (ipRetry > 0) {
+            throw new RateLimitExceededException("Too many login attempts. Please try again later.", ipRetry);
+        }
+        long emailRetry = getRetryAfterSecondsIfExceeded(emailKey, now);
+        if (emailRetry > 0) {
+            throw new RateLimitExceededException("Too many login attempts. Please try again later.", emailRetry);
         }
     }
 
     public void recordSuccess(String ip, String email) {
-        attempts.remove(toIpKey(ip));
         attempts.remove(toEmailKey(email));
+        // Shared IP counter is intentionally NOT reset on individual success
     }
 
     public void recordFailure(String ip, String email) {
         Instant now = clock.instant();
-        registerFailure(toIpKey(ip), now);
-        registerFailure(toEmailKey(email), now);
+        tryReserve(toIpKey(ip), now);
+        tryReserve(toEmailKey(email), now);
     }
 
     public void reset() {
         attempts.clear();
     }
 
-    private boolean isExceeded(String key, Instant now) {
-        Deque<Instant> timestamps = attempts.get(key);
-        if (timestamps == null) {
-            return false;
-        }
-        synchronized (timestamps) {
-            cleanExpired(timestamps, now);
-            return timestamps.size() >= maxAttempts;
-        }
-    }
-
-    private void registerFailure(String key, Instant now) {
+    private long tryReserve(String key, Instant now) {
         if (attempts.size() >= maxTrackedKeys && !attempts.containsKey(key)) {
             evictExpiredKeys(now);
             if (attempts.size() >= maxTrackedKeys) {
-                // Remove one arbitrary entry to enforce the strict memory bound
                 Iterator<String> it = attempts.keySet().iterator();
                 if (it.hasNext()) {
                     it.next();
@@ -80,16 +95,54 @@ public class LoginRateLimiter {
             }
         }
 
+        AtomicLong retryAfter = new AtomicLong(0);
         attempts.compute(key, (k, deque) -> {
             if (deque == null) {
                 deque = new ArrayDeque<>();
             }
             synchronized (deque) {
                 cleanExpired(deque, now);
+                if (deque.size() >= maxAttempts) {
+                    Instant oldest = deque.peekFirst();
+                    long seconds = oldest != null
+                            ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
+                            : windowDuration.toSeconds();
+                    retryAfter.set(Math.max(1, seconds));
+                    return deque;
+                }
                 deque.addLast(now);
+                return deque;
             }
-            return deque;
         });
+        return retryAfter.get();
+    }
+
+    private void rollbackAttempt(String key, Instant now) {
+        Deque<Instant> deque = attempts.get(key);
+        if (deque != null) {
+            synchronized (deque) {
+                deque.removeLastOccurrence(now);
+            }
+        }
+    }
+
+    private long getRetryAfterSecondsIfExceeded(String key, Instant now) {
+        Deque<Instant> timestamps = attempts.get(key);
+        if (timestamps == null) {
+            return 0;
+        }
+        synchronized (timestamps) {
+            cleanExpired(timestamps, now);
+            if (timestamps.size() >= maxAttempts) {
+                Instant oldest = timestamps.peekFirst();
+                if (oldest != null) {
+                    long seconds = Duration.between(now, oldest.plus(windowDuration)).toSeconds();
+                    return Math.max(1, seconds);
+                }
+                return windowDuration.toSeconds();
+            }
+            return 0;
+        }
     }
 
     private void cleanExpired(Deque<Instant> deque, Instant now) {
@@ -113,10 +166,18 @@ public class LoginRateLimiter {
     }
 
     private String toIpKey(String ip) {
-        return "ip:" + (ip == null ? "unknown" : ip.trim());
+        String cleanIp = (ip == null ? "unknown" : ip.trim());
+        if (cleanIp.length() > 64) {
+            cleanIp = cleanIp.substring(0, 64);
+        }
+        return "ip:" + cleanIp;
     }
 
     private String toEmailKey(String email) {
-        return "email:" + (email == null ? "unknown" : AuthService.normalizeEmail(email));
+        String cleanEmail = (email == null ? "unknown" : AuthService.normalizeEmail(email));
+        if (cleanEmail.length() > 255) {
+            cleanEmail = cleanEmail.substring(0, 255);
+        }
+        return "email:" + cleanEmail;
     }
 }
