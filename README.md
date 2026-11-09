@@ -20,9 +20,9 @@ Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance acco
 │               Spring Boot 4.1.2 Backend                  │
 │  - REST Controllers (Auth, Account, Transaction, Audit)   │
 │  - Spring Security (Sessions, CSRF, Strict RBAC)          │
-│  - Login Rate Limiter (Atomic Reservation, Sliding Window)│
+│  - Login Rate Limiter (Atomic Reservation, Synchronized LinkedHashMap LRU)│
 │  - AccountService (Secure Bounded Number Generation)      │
-│  - TransactionService (Advisory Locks, Canonical Fingerprint)│
+│  - TransactionService (Advisory Locks with SHA-256 Long Key, Canonical Fingerprint)│
 │  - Deterministic Account Lock Ordering (Pessimistic Lock) │
 │  - Viewer-Aware Response Masking (Privacy by Design)      │
 │  - Batch Transaction History (Eliminates N+1 Queries)     │
@@ -34,7 +34,7 @@ Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance acco
                               │
 ┌─────────────────────────────▼─────────────────────────────┐
 │                 PostgreSQL 18 Database                   │
-│  - Flyway Migrations (V1 — V8)                           │
+│  - Flyway Migrations (V1 — V9)                           │
 │  - Operational System Cash Vault (`SYS-INR-CASH-VAULT-001`)│
 │  - Normal Balance Modeling (DEBIT / CREDIT)               │
 │  - Account Ownership & Classification Invariants         │
@@ -63,8 +63,8 @@ Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance acco
    - **Bank Asset / Vault Accounts (`DEBIT` normal)**: `Balance = Total Debits - Total Credits`
 3. **Transaction Invariants**: Any transaction containing ledger entries must finish as `COMPLETED` at commit time, contain at least one debit and one credit, have equal total debits and credits (`Total Debits = Total Credits`), and maintain strict currency consistency across all entries and accounts. Allowed transaction statuses are strictly `PENDING`, `COMPLETED`, and `FAILED`.
 4. **Account Ownership Rules**: Every `CUSTOMER` account must have an associated owner user (`owner_user_id IS NOT NULL`). Every `SYSTEM` account must have no owner user (`owner_user_id IS NULL`). Account classification (`account_type`, `normal_balance`, `currency`) is permanently immutable once ledger entries are recorded.
-5. **Deterministic Concurrency Control**: Whenever multiple accounts are touched in a transaction (such as sender and receiver in a transfer, or customer and cash vault in deposits/withdrawals), all participating account IDs are sorted in ascending natural UUID order and locked using `SELECT ... FOR UPDATE` before balances are evaluated. This strictly eliminates database deadlocks under high-concurrency opposing-direction transfers.
-6. **Transaction-Scoped Idempotency Advisory Locking**: Every financial operation first acquires a PostgreSQL transaction-scoped advisory lock (`pg_advisory_xact_lock`) computed over a SHA-256 hash of `userId + ":" + normalizedKey`. This serializes concurrent duplicate requests from the same user across all accounts without incurring unique-constraint collision aborts. If a request is retried with the exact same payload, the original completed transaction is safely returned. If a different payload is supplied with an already-used key, HTTP 409 Conflict is returned.
+5. **Deterministic Concurrency Control**: Whenever multiple accounts are touched in a transaction (such as sender and receiver in a transfer, or customer and cash vault in deposits/withdrawals), all participating account IDs are sorted in ascending natural UUID order and locked using `SELECT ... FOR UPDATE` before balances are evaluated. This deterministic ordering substantially reduces lock-order deadlock risks under concurrent transfers between identical account pairs.
+6. **Transaction-Scoped Idempotency Advisory Locking**: Every financial operation first acquires a PostgreSQL transaction-scoped advisory lock (`pg_advisory_xact_lock`) passing a 64-bit integer derived from a SHA-256 hash of `userId + ":" + normalizedKey`. This serializes concurrent duplicate requests from the same user across all accounts without incurring unique-constraint collision aborts. If a request is retried with the exact same payload, the original completed transaction is safely returned. If a different payload is supplied with an already-used key, HTTP 409 Conflict is returned.
 7. **JPA Entity Synchronization**: Database triggers execute trigger-updated balance recalculations. The application executes `entityManager.flush()` followed by `entityManager.refresh(account)` within the active database transaction to ensure in-memory JPA entities match the database state.
 
 ---
@@ -118,22 +118,21 @@ An internal transfer between two customer accounts moves liability directly betw
 
 ## 4. Database Setup & Least-Privilege Configuration
 
-The application completely eliminates hardcoded fallback credentials and enforces strict credential separation between schema management (Flyway) and runtime query execution (JPA):
+The application enforces strict credential separation between schema management (Flyway / `ledgerline_app`) and runtime query execution (JPA / `ledgerline_runtime`), using `DB_PASSWORD` as the single source of truth for the migration role and `APP_DB_PASSWORD` for the runtime role:
 
 ### Environment Variables (`.env`)
 ```properties
-# PostgreSQL Container Administrator Password
+# PostgreSQL Container Administrator & Migration Identity (Schema Owner: ledgerline_app)
 DB_PASSWORD=replace_with_a_strong_random_password
 
-# Application Runtime Identity (Least Privilege)
+# Application Runtime Identity (Least Privilege: ledgerline_runtime)
 APP_DB_URL=jdbc:postgresql://localhost:5432/ledgerline_db
 APP_DB_USERNAME=ledgerline_runtime
 APP_DB_PASSWORD=replace_with_runtime_password
 
-# Flyway Migration Identity (Schema Owner)
+# Flyway Migration Identity (Uses DB_PASSWORD as single source of truth for ledgerline_app)
 FLYWAY_DB_URL=jdbc:postgresql://localhost:5432/ledgerline_db
 FLYWAY_DB_USERNAME=ledgerline_app
-FLYWAY_DB_PASSWORD=replace_with_migration_password
 ```
 
 ### Docker Compose
@@ -148,7 +147,7 @@ docker compose up -d
 - **Data Volume**: `ledgerline_data` (Do not delete or run `docker compose down -v`)
 
 ### Dedicated Test Database (`ledgerline_test_db`)
-The test suite executes exclusively against a dedicated test database:
+The test suite executes exclusively against an isolated test database (`ledgerline_test_db`). When starting via Docker Compose on an empty volume, `docker/initdb/01-init-runtime-role.sh` creates `ledgerline_test_db` automatically. If initializing manually or connecting to an existing PostgreSQL instance without running the initialization script, create the database manually:
 
 ```powershell
 docker exec ledgerline-postgres psql -U ledgerline_app -d postgres -c "CREATE DATABASE ledgerline_test_db OWNER ledgerline_app;"
@@ -158,7 +157,7 @@ docker exec ledgerline-postgres psql -U ledgerline_app -d postgres -c "CREATE DA
 
 ---
 
-## 5. Database Migrations (V1 — V8)
+## 5. Database Migrations (V1 — V9)
 
 Flyway manages all schema changes sequentially. Existing migrations are strictly immutable:
 
@@ -190,6 +189,11 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
   - Reaffirms append-only `ledger_entries` and `audit_logs` (all `UPDATE` and `DELETE` revoked).
   - Revokes `CREATE` on schema `public`.
   - Formally validates canonical properties of operational system vault `SYS-INR-CASH-VAULT-001`.
+- **`V9__prevent_privilege_escalation_and_balance_fabrication.sql`**:
+  - Enforces `ALTER ROLE ledgerline_runtime NOINHERIT;`.
+  - Revokes `CREATE` on schema `public` from `PUBLIC` (`REVOKE CREATE ON SCHEMA public FROM PUBLIC;`).
+  - Trigger `trg_protect_user_role_assignment` calling `protect_user_role_assignment()`: aborts `INSERT` on `users` under runtime identity if `role <> 'CUSTOMER'` with SQLState `42501`.
+  - Trigger `trg_protect_account_insertion` calling `protect_account_insertion()`: aborts `INSERT` on `accounts` under runtime identity if `account_type <> 'CUSTOMER'`, `owner_user_id IS NULL`, `balance <> 0.00`, `normal_balance <> 'CREDIT'`, `allow_negative = TRUE`, or `currency <> 'INR'` with SQLState `42501`.
 
 ---
 
@@ -358,10 +362,10 @@ cd backend\ledgerline
 .\mvnw.cmd clean verify
 ```
 
-### Test Suite Summary (89 Total Tests, 100% Passed)
-- **`Phase2FinancialEngineIntegrationTests`** (47 tests):
+### Test Suite Summary (95 Total Tests, 100% Passed)
+- **`Phase2FinancialEngineIntegrationTests`** (53 tests):
   - **Account Management (6 tests)**: Account creation, unique 12-digit `VLTR` account numbers, currency validation, owner-isolated listing, cross-customer access rejection (403), system account access rejection (403).
-  - **Deposit Operations (6 tests)**: Balanced double-entry creation, balance increments, zero/negative amount rejection (400), missing idempotency key rejection (400), cross-customer deposit rejection (403), inactive account rejection (400), cross-currency deposit rejection (400).
+  - **Deposit Operations (5 tests)**: Balanced double-entry creation, balance increments, zero/negative amount rejection (400), missing idempotency key rejection (400), cross-customer deposit rejection (403), inactive account rejection (400), cross-currency deposit rejection (400).
   - **Withdrawal Operations (3 tests)**: Balanced double-entry creation, balance decrements, insufficient funds rejection (422), cross-customer withdrawal rejection (403).
   - **Transfer Operations (5 tests)**: Zero-sum internal transfers, sender debit and receiver credit, cash vault balance preservation, self-transfer rejection (400), transfer to system account rejection (403), insufficient sender balance rejection (422), non-existent recipient rejection (404).
   - **Idempotency & Validation (7 tests)**:
@@ -374,11 +378,11 @@ cd backend\ledgerline
     - System counterpart misconfiguration safely aborts transaction without partial effects.
   - **PostgreSQL Concurrency Tests (4 multithreaded tests)**:
     - *Simultaneous withdrawals exceeding balance*: 2 concurrent threads each attempt 800 INR withdrawal against 1000 INR balance -> exactly 1 succeeds, other fails 422, final balance 200 INR, zero overdraft.
-    - *Bilateral opposing transfers*: Simultaneous transfers A->B and B->A across parallel threads -> zero deadlocks due to deterministic natural UUID ordering, balances preserved.
+    - *Bilateral opposing transfers*: Simultaneous transfers A->B and B->A across parallel threads -> reduced deadlock risk via deterministic natural UUID ordering, balances preserved.
     - *Simultaneous duplicate requests*: Identical deposit requests with same idempotency key in parallel -> exactly 1 execution, identical transaction returned, zero duplicate entries.
     - *Simultaneous transfers to single destination*: Multiple senders transferring simultaneously to one receiver -> all succeed with accurate balances.
   - **Financial Reconciliation (1 test)**: Global Debit == Credit check across all ledger entries, and per-account verification that projected `balance` strictly equals `SUM(entries)` directly calculated in SQL.
-  - **Security, Privileges & Privacy (15 tests)**:
+  - **Security, Privileges & Privacy (22 tests)**:
     - Unauthenticated requests rejected (401).
     - AUDITOR role blocked from money movement (403).
     - Cross-user transaction access blocked (403).
@@ -394,14 +398,102 @@ cd backend\ledgerline
     - Deposit response masks system counterpart as `"Cash/Bank Counterpart"` with `null` accountId.
     - Transfer response masks counterpart customer with `****1234` and `null` accountId for both sender and receiver.
     - Customer `AccountResponse` does not expose `normalBalance`.
+    - PostgreSQL Catalog: runtime role attributes enforce non-superuser, NOINHERIT, and least privilege (`pg_roles`).
+    - PostgreSQL Catalog: runtime role inherits zero memberships or administrative options (`pg_auth_members`).
+    - PostgreSQL Catalog: public schema tables are owned by migration administrator (`ledgerline_app`) and not runtime role (`pg_tables`).
+    - PostgreSQL Catalog: runtime table privileges strictly limited to `SELECT` and `INSERT` (`information_schema.role_table_grants`).
+    - PostgreSQL Catalog: column `UPDATE` grants strictly limited to status and timestamp columns (`information_schema.role_column_grants`).
+    - PostgreSQL Catalog: schema `public` does not grant `CREATE` to runtime role or `PUBLIC` (`pg_namespace`).
+- **`RuntimeRoleApplicationIntegrationTest`** (8 integration tests): End-to-end application execution directly under the restricted `ledgerline_runtime` PostgreSQL role:
+  - Role verification: confirms `CURRENT_USER` and `SESSION_USER` equal `ledgerline_runtime`.
+  - User registration through `AuthService` under runtime credentials.
+  - Customer account creation and balance retrieval under runtime credentials.
+  - Cash deposit (1,000 INR), completed transaction status, and trigger-projected account balance update.
+  - Cash withdrawal (400 INR) with balance reduction to 600 INR.
+  - Customer-to-customer transfer (250 INR) with dual-account balance updates (350 INR sender, 250 INR receiver).
+  - Paginated transaction history retrieval with counterpart privacy masking under runtime credentials.
+  - Database privilege enforcement: directly asserts that prohibited operations (direct balance update, ledger entry deletion, audit log deletion, table truncation, user role escalation, and balance fabrication) are rejected with PostgreSQL error `42501 permission denied`.
 - **`Phase1IntegrationTests`** (31 integration tests): Core accounting mathematics, trigger projections, call-stack protections, session fixation, CSRF, BCrypt byte boundaries, login rate limits, and audit trail.
-- **`LoginRateLimiterTest`** (6 unit tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and LRU eviction.
+- **`LoginRateLimiterTest`** (6 unit tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and access-ordered LRU eviction.
 - **`MaxUtf8BytesValidatorTest`** (4 unit tests): UTF-8 boundary checks for BCrypt 72-byte limit.
 - **`LedgerlineApplicationTests`** (1 test): Application context initialization and actuator health check.
 
+**Total automated test suite**: **103 passing tests** across 6 test classes with zero failures, zero errors, and zero skipped tests.
+
 ---
 
-## 9. Implementation Status
+## 9. Database Provisioning & Credential Security
+
+LedgerLine enforces strict role separation between schema migration management (`ledgerline_app`) and runtime application query execution (`ledgerline_runtime`):
+
+1. **Migration Administrator (`ledgerline_app`)**:
+   - In the official PostgreSQL Docker image environment (`docker-compose.yml`), `POSTGRES_USER=ledgerline_app` initializes that account as the PostgreSQL cluster superuser during initial bootstrap. This gives it the administrative authority needed to create the isolated test database (`ledgerline_test_db`) and manage role-level grants. In contrast, in a manually provisioned environment, `ledgerline_app` can be a standard non-superuser database/schema owner (`CREATE ROLE ledgerline_app WITH LOGIN CREATEDB;`).
+   - Schema owner with DDL privileges to execute Flyway migrations V1 through V9.
+   - `DB_PASSWORD` acts as the single source of truth for `ledgerline_app` across PostgreSQL initialization and Flyway connection settings (`spring.flyway.password=${DB_PASSWORD}`).
+2. **Application Runtime Role (`ledgerline_runtime`)**:
+   - Least-privilege identity used exclusively by the Spring Boot backend (`spring.datasource.username`, `spring.datasource.password=${APP_DB_PASSWORD}`).
+   - Attributes: `NOINHERIT`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `LOGIN`.
+   - Table-level `SELECT` and `INSERT` only.
+   - Zero table-level `UPDATE`, `DELETE`, or `TRUNCATE`.
+   - Column-level `UPDATE` restricted strictly to `(status, updated_at)` on `users` and `accounts`, and `(status, completed_at)` on `ledger_transactions`.
+   - Zero `CREATE` privileges on schema `public`.
+   - Database boundary triggers prevent direct insertion of `ADMIN`/`AUDITOR` roles or fabricated opening balances.
+
+### Historical Migration V6 & Credential Provisioning Across Environments
+
+> [!IMPORTANT]
+> **Historical Migration Notice**: Flyway migration `V6__account_ownership_immutability_and_privileges.sql` contains a historical literal fallback password in its role-creation statement (`CREATE ROLE ledgerline_runtime WITH LOGIN PASSWORD 'ledgerline_runtime_secret' ...`). Because already-applied Flyway migrations are immutable by design and must never be altered retrospectively, this statement remains in the historical migration script. Active application and test configurations do not rely on this fallback.
+
+The system handles role provisioning across different operational scenarios as follows:
+
+#### 1. Fresh Docker Installation (Empty Volume)
+On a fresh container deployment, `docker-compose.yml` mounts `docker/initdb/01-init-runtime-role.sh` to `/docker-entrypoint-initdb.d:ro`. When PostgreSQL initializes:
+1. It provisions `ledgerline_app` using `POSTGRES_USER` and `DB_PASSWORD`.
+2. The initialization script verifies that `APP_DB_PASSWORD` is present and non-empty (failing immediately if absent).
+3. The script pre-creates `ledgerline_runtime` with the configured `APP_DB_PASSWORD` using psql's `\getenv` and safe parameter quoting (`format('%L', :'runtime_pwd') \gexec`), supporting special characters and avoiding command-line exposure.
+4. When Flyway executes migration V6, its `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ledgerline_runtime')` check finds the role already exists and skips the historical statement.
+5. The init script provisions the isolated test database `ledgerline_test_db` owned by `ledgerline_app`.
+
+#### 2. Fresh Manual / Non-Docker Installation
+When deploying against a standalone PostgreSQL instance without Docker entrypoint scripts:
+- Pre-provision the `ledgerline_runtime` role without embedding cleartext passwords into SQL statements:
+  ```sql
+  CREATE ROLE ledgerline_runtime WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+  ```
+- Set its password interactively using PostgreSQL's `\password` command:
+  ```text
+  \password ledgerline_runtime
+  ```
+- This ensures Flyway migration V6's `IF NOT EXISTS` check detects the role and skips the historical fallback statement, while avoiding storing or logging cleartext passwords in SQL command histories.
+
+#### 3. Existing Database Volume (Password Rotation)
+PostgreSQL initialization scripts in `/docker-entrypoint-initdb.d/` only run once on fresh, empty volumes; they do **not** re-run on an already-initialized data volume. Changing credentials in `.env` alone does not alter an existing PostgreSQL role's password in the database. Never delete, recreate, or reset an existing volume to rotate credentials.
+
+To rotate passwords on an existing volume without exposing credentials in shell command arguments or process listings, use PostgreSQL's interactive `\password` command for each role:
+
+##### Rotating `ledgerline_app` (Migration Administrator / DB_PASSWORD):
+```bash
+docker exec -it ledgerline-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_app"
+```
+Enter and confirm the new migration password interactively when prompted. Then:
+1. Update `.env`: set `DB_PASSWORD=new_admin_password`.
+2. Any subsequent Flyway migration run or administrative connection will authenticate using the updated password.
+
+##### Rotating `ledgerline_runtime` (Application Runtime / APP_DB_PASSWORD):
+```bash
+docker exec -it ledgerline-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_runtime"
+```
+Enter and confirm the new runtime password interactively when prompted. Then:
+1. Update `.env`: set `APP_DB_PASSWORD=new_runtime_password`.
+2. Restart the backend application so HikariCP reconnects using the updated credentials:
+```powershell
+cd backend\ledgerline
+.\mvnw.cmd spring-boot:run
+```
+
+---
+
+## 10. Implementation Status
 
 ### Implemented in Phase 1 & Phase 2
 - [x] Immutable PostgreSQL schema with Flyway migrations (V1—V9).
@@ -425,26 +517,9 @@ cd backend\ledgerline
 - [x] Audit logging for account creation, deposits, withdrawals, transfers, and rate limit exhaustion.
 - [x] Fine-grained RBAC: `AUDITOR` strictly blocked from money movement and account creation.
 - [x] Isolated PostgreSQL test database (`ledgerline_test_db`) and runtime safety guard (`TestDatabaseGuard`).
+- [x] Automated PostgreSQL catalog assertions detecting privilege regressions in integration tests.
 - [x] Formal engineering threat model ([THREATS.md](THREATS.md)).
-- [x] 100% test pass rate across 89 automated integration and unit tests.
-- [x] Normal balance classification (`DEBIT` vs. `CREDIT`) and trigger-based projection.
-- [x] Operational system cash vault account (`SYS-INR-CASH-VAULT-001`) with strict property validation.
-- [x] Customer account management with unique bounded `VLTR` number generation and server-side owner binding.
-- [x] Simulated double-entry cash deposits and withdrawals.
-- [x] Atomic customer-to-customer transfers with zero-sum ledger invariants.
-- [x] Concurrency-safe row-locking (`FOR UPDATE`) with deterministic UUID ordering.
-- [x] Deadlock-free bilateral concurrent transfers.
-- [x] Overdraft prevention with post-lock balance validation.
-- [x] Concurrency-safe idempotency via PostgreSQL transaction-scoped advisory locks (`pg_advisory_xact_lock`).
-- [x] Canonical SHA-256 payload fingerprinting (scale-2 normalization without rounding).
-- [x] Cross-account idempotency serialization for the same user.
-- [x] Viewer-aware response privacy masking (system vault hidden, counterpart accounts masked).
-- [x] Optimized transaction history query eliminating N+1 entries pattern.
-- [x] Audit logging for account creation, deposits, withdrawals, and transfers.
-- [x] Fine-grained RBAC: `AUDITOR` strictly blocked from money movement and account creation.
-- [x] Isolated PostgreSQL test database (`ledgerline_test_db`) and runtime safety guard (`TestDatabaseGuard`).
-- [x] Formal engineering threat model ([THREATS.md](THREATS.md)).
-- [x] 100% test pass rate across 84 automated integration and unit tests.
+- [x] 100% test pass rate across 103 automated integration and unit tests.
 
 ### Planned for Phase 3 & Beyond (Deferred)
 - [ ] Compensating transaction reversal endpoint (`POST /api/v1/transactions/{id}/reverse`).

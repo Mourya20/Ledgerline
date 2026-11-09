@@ -44,8 +44,12 @@ This document defines the engineering threat model for **LedgerLine**, an immuta
           ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TRUST BOUNDARY 4: POSTGRESQL 18 DATABASE AUTHORITY                     │
-│ - Schema DDL isolation (`ddl-auto=validate`, Flyway V1-V6 migrations)  │
-│ - Least-privilege runtime role (`ledgerline_runtime`, no balance DML)  │
+│ - Schema DDL isolation (`ddl-auto=validate`, Flyway V1-V9 migrations)  │
+│ - Least-privilege runtime role (`ledgerline_runtime`, NOINHERIT)        │
+│   * No TRUNCATE or DELETE on any table                                 │
+│   * Column-level UPDATE restricted to status and timestamps            │
+│   * No CREATE on schema public                                         │
+│ - INSERT boundary guards: blocks ADMIN/AUDITOR roles & fake balances   │
 │ - Call-stack protected balance projection trigger (`PG_CONTEXT`)       │
 │ - Normal balance classification (`normal_balance`: DEBIT / CREDIT)     │
 │ - Account ownership invariants (`accounts_ownership_policy_chk`)       │
@@ -146,15 +150,17 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Name**: Active Session Persistence for Suspended or Disabled Accounts
 - **Category**: Authentication & Account Security
 - **Severity**: High (Terminated employees or frozen fraudulent accounts continuing operations)
-- **Attack Scenario**: A customer account is flagged for fraud or an employee is terminated, and an administrator sets `users.enabled = FALSE`. If the application only evaluates user credentials at login time and caches the authorization principal in the HTTP session without re-validating the user's status, the attacker can continue executing financial actions using their existing session.
+- **Attack Scenario**: A customer account is flagged for fraud or an employee is terminated, and an administrator sets `users.enabled = FALSE` or transitions status from `ACTIVE`. If the application only evaluates user credentials at login time and caches the authorization principal in the HTTP session without re-validating the user's status, the attacker can continue executing financial actions using their existing session.
 - **Potential Impact**: Fraudulent withdrawals from frozen accounts, disgruntled employee data exfiltration.
-- **Mitigation Strategy**: The application inspects the database status of the user on security-sensitive actions and verifies `UserEntity.isEnabled()`. In addition, `AuthController.login()` immediately checks `user.isEnabled()`, rejecting disabled users with HTTP 401 and writing an `AUTH_DISABLED_USER_ATTEMPT` audit log.
+- **Mitigation Strategy**: The application evaluates user status both at authentication time and on **every subsequent HTTP request** via `SessionUserValidationFilter` (`OncePerRequestFilter`). On each request with an authenticated session, the filter queries the database to confirm that the user exists, holds `UserStatus.ACTIVE`, and that their session authorities still match `"ROLE_" + user.getRole().name()`. If the user is disabled, deleted, or their role was modified mid-session, the security context is immediately cleared, the session is invalidated, and HTTP 401 Unauthorized is returned.
 - **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/ledgerline/security/SessionUserValidationFilter.java`
+  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java`
   - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 80-87)
   - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditService.java`
 - **Verification**: `Phase1IntegrationTests.disabledUserCannotAuthenticate()`
 - **Status**: MITIGATED
-- **Residual Risk**: For long-lived active sessions between requests, a custom Spring Security filter or principal refresh interceptor that checks `user.enabled` on every HTTP request will be added in Phase 2.
+- **Residual Risk**: Single-instance database lookup per authenticated request adds minimal latency. Multi-node clustering without sticky sessions or distributed session store is deferred.
 
 ---
 
@@ -169,7 +175,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java` (lines 43-48)
   - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 53-56)
-- **Verification**: `Phase1IntegrationTests.csrfProtectionRejectsStateChangingRequestsWithoutToken()`
+- **Verification**: `Phase1IntegrationTests.csrfIsRequiredForStateChangingEndpoints()`
 - **Status**: MITIGATED
 - **Residual Risk**: Requires frontend integration to extract `XSRF-TOKEN` cookie and include it in request headers.
 
@@ -184,13 +190,13 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Severity**: Critical (Customer data exposure, unauthorized fund access)
 - **Attack Scenario**: Customer A logs in and has account UUID `11111111-...`. Customer A changes the requested account ID in an API call to Customer B's account UUID `22222222-...` (e.g., `GET /api/v1/accounts/22222222-...` or `POST /api/v1/transfers`). If the service layer retrieves the account purely by primary key without asserting `account.user_id == authenticatedUser.id`, Customer A accesses Customer B's private financial records.
 - **Potential Impact**: Severe privacy breach, regulatory non-compliance (GLBA, GDPR), unauthorized fund transfer.
-- **Mitigation Strategy**: The domain model binds each `CUSTOMER` account to an explicit `user_id` foreign key (`AccountEntity.user`). In Phase 1, `AccountEntity` explicitly models ownership. Account queries enforce user ownership filtering. Phase 2 transfer services enforce ownership checks in `@PreAuthorize` and repository queries (`findByAccountNumberAndUserId`).
+- **Mitigation Strategy**: The domain model binds each `CUSTOMER` account to an explicit `user_id` foreign key (`AccountEntity.owner`). Service-layer methods strictly enforce ownership boundaries: both `AccountService` and `TransactionService` invoke `resolveCustomerAccount(accountId, userId)`, which asserts that the account exists, is a `CUSTOMER` account (rejecting `SYSTEM` accounts with `SystemAccountAccessException`), and that `account.getOwner().getId().equals(userId)` (rejecting cross-customer access with `AccountAccessDeniedException`). Transfer source accounts, deposits, withdrawals, and balance queries strictly resolve through this ownership guard. Account listing strictly filters by the authenticated user's ID (`accountRepository.findAllByOwnerIdOrderByCreatedAtDesc(userId)`).
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`accounts.owner_user_id` FK)
   - `backend/ledgerline/src/main/java/com/ledgerline/domain/AccountEntity.java`
   - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (`resolveCustomerAccount` ownership check)
   - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`resolveCustomerAccount` ownership check)
-- **Verification**: `Phase1IntegrationTests.publicRegistrationCreatesCustomerRoleOnly()`, `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`
+- **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`
 - **Status**: MITIGATED
 - **Residual Risk**: Any newly added endpoints must continue to pass authenticated principal identity directly into service-layer ownership resolvers.
 
@@ -522,20 +528,21 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Ledger destruction, unconstrained balance tampering, audit log tampering.
 - **Mitigation Strategy**: Architectural separation of database identities:
   1. Migration Owner (`ledgerline_app`): Owns the schema and runs Flyway DDL migrations. Functions such as `apply_ledger_entry_to_balance` are owned by `ledgerline_app` and execute with `SECURITY DEFINER`.
-  2. Runtime Application Role (`ledgerline_runtime`): The unprivileged role used by the running Spring Boot backend. Granted only necessary table permissions:
-     - `SELECT` on all tables.
-     - `INSERT` on `users`, `accounts`, `ledger_transactions`, `ledger_entries`, `audit_logs`.
-     - `UPDATE` on `users`.
-     - `UPDATE` on non-balance columns of `accounts` (`account_number`, `owner_user_id`, `currency`, `account_type`, `normal_balance`, `allow_negative`, `is_active`, `updated_at`).
-     - Explicitly denied `UPDATE` and `DELETE` on `ledger_entries` and `audit_logs`.
-     - Explicitly denied `UPDATE (balance)` on `accounts`.
+  2. Runtime Application Role (`ledgerline_runtime`): The unprivileged role used by the running Spring Boot backend. Granted only necessary least-privilege permissions:
+     - `SELECT` and `INSERT` on domain tables (`users`, `accounts`, `ledger_transactions`, `ledger_entries`, `audit_logs`).
+     - Column-level `UPDATE` strictly restricted to `(status, updated_at)` on `users` and `accounts`, and `(status, completed_at)` on `ledger_transactions` (Migration V8).
+     - Prohibited from `TRUNCATE` across all tables, and prohibited from `DELETE` across all tables (Migration V8).
+     - Prohibited from `CREATE` on schema `public` (Migration V8 & V9).
+     - Configured with `NOINHERIT` to prevent inheriting administrative capabilities (Migration V9).
+     - Direct `INSERT` boundary triggers `trg_protect_user_role_assignment` and `trg_protect_account_insertion` (Migration V9) preventing role escalation to ADMIN/AUDITOR or balance fabrication.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/resources/db/migration/V6__account_ownership_immutability_and_privileges.sql`
+  - `backend/ledgerline/src/main/resources/db/migration/V8__harden_runtime_database_privileges.sql`
+  - `backend/ledgerline/src/main/resources/db/migration/V9__prevent_privilege_escalation_and_balance_fabrication.sql`
   - `backend/ledgerline/src/main/resources/application.properties`
   - `backend/ledgerline/src/test/resources/application-test.properties`
-- **Verification**: `Phase1IntegrationTests.runtimeUserCannotDirectlyUpdateBalance()`
+- **Verification**: `Phase2FinancialEngineIntegrationTests.runtimeRoleCatalogAttributesAssertLeastPrivilege()`, `runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert()`, `runtimeRoleColumnGrantsLimitUpdateStrictly()`, `schemaPublicHasNoCreatePrivilegeForRuntimeOrPublic()`
 - **Status**: MITIGATED
-- **Residual Risk**: Superuser credentials (`postgres`) must remain isolated in container secrets management.
+- **Residual Risk**: Direct connection as `ledgerline_runtime` could still insert a valid customer account bound to an existing customer ID; application-layer authentication remains the authoritative ownership enforcement barrier.
 
 ---
 
@@ -660,12 +667,12 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Duplicate financial transactions, customer disputes, unapproved balance changes.
 - **Mitigation Strategy**:
   1. Mandatory `Idempotency-Key` request header on all mutating financial endpoints.
-  2. SHA-256 request payload fingerprinting computed over transaction type, account IDs, amount, and currency.
-  3. Pre-execution check against `ledger_transactions` for existing completed transactions with the same `(user_id, idempotency_key)`.
-  4. Post-lock re-check: When two identical requests race simultaneously, the second thread waits on the account row lock, wakes up after the first commits, detects the newly committed transaction, and returns the original result without executing duplicate ledger entries.
-  5. Composite database unique index `ledger_transactions_idempotency_uidx` on `(initiated_by_user_id, idempotency_key)` preventing duplicate inserts at the database layer.
+  2. Canonical SHA-256 request payload fingerprinting computed over transaction type, account IDs, scale-2 normalized amount (`amount.setScale(2, RoundingMode.UNNECESSARY)`), and uppercase currency.
+  3. Pre-transaction PostgreSQL advisory locking (`pg_advisory_xact_lock`) computed over a 64-bit hash of `userId + ":" + normalizedKey`. This serializes concurrent identical or differing requests from the same user across all accounts without encountering abort-inducing unique index collision rollbacks.
+  4. Pre-execution check against `ledger_transactions` for existing completed transactions with the same `(user_id, idempotency_key)`. If completed with identical fingerprint, the original completed transaction is safely returned without duplicate ledger entries.
+  5. Composite database unique index `ledger_transactions_idempotency_uidx` on `(initiated_by_user_id, idempotency_key)` providing secondary database-level uniqueness enforcement.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`checkExistingIdempotentTransaction`, post-lock re-check)
+  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`acquireIdempotencyAdvisoryLock`, `checkExistingIdempotentTransaction`)
   - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`ledger_transactions_idempotency_uidx`)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameKeySamePayloadReturnsOriginalResult()`, `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentDuplicateRequestsExecuteOnlyOnce()`
 - **Status**: MITIGATED
@@ -916,9 +923,9 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 | `SEC-AUTH-002` | BCrypt 72-Byte Truncation | Authentication | High | MITIGATED | `@MaxUtf8Bytes`, `MaxUtf8BytesValidator` | `passwordExceeding72Utf8BytesRejectedOnRegistration` |
 | `SEC-AUTH-003` | Session Fixation | Authentication | Critical | MITIGATED | `SessionFixationProtectionStrategy` | `sessionFixationProtectionRotatesSessionId` |
 | `SEC-AUTH-004` | Session Interception / Leakage | Authentication | High | MITIGATED | Hardened Cookie Config (`HttpOnly`, `SameSite`) | `unauthenticatedAccessToProtectedEndpointsFails` |
-| `SEC-AUTH-005` | Disabled User Active Session | Authentication | High | MITIGATED | `UserEntity.isEnabled()`, `AuthController` | `disabledUserCannotAuthenticate` |
-| `SEC-AUTH-006` | Cross-Site Request Forgery | Authentication | High | MITIGATED | `CookieCsrfTokenRepository`, `CsrfFilter` | `csrfProtectionRejectsStateChangingRequestsWithoutToken` |
-| `SEC-AUTHZ-001` | Broken Object-Level Auth (IDOR) | Authorization | Critical | MITIGATED* | `AccountEntity.owner` FK, Query isolation | `publicRegistrationCreatesCustomerRoleOnly` |
+| `SEC-AUTH-005` | Disabled User Active Session | Authentication | High | MITIGATED | `SessionUserValidationFilter`, `UserEntity.isEnabled()`, `AuthController` | `disabledUserCannotAuthenticate` |
+| `SEC-AUTH-006` | Cross-Site Request Forgery | Authentication | High | MITIGATED | `CookieCsrfTokenRepository`, `CsrfFilter` | `csrfIsRequiredForStateChangingEndpoints` |
+| `SEC-AUTHZ-001` | Broken Object-Level Auth (IDOR) | Authorization | Critical | MITIGATED | `AccountEntity.owner`, `resolveCustomerAccount` ownership check | `customerCannotAccessAnotherCustomerAccount` |
 | `SEC-AUTHZ-002` | Role Privilege Escalation | Authorization | Critical | MITIGATED | Fixed DTO, Hardcoded `CUSTOMER` Role | `publicRegistrationCreatesCustomerRoleOnly` |
 | `SEC-AUTHZ-003` | AUDITOR Write Bypass | Authorization | High | MITIGATED | Read-only `/api/v1/audit/logs`, removed fake endpoints | `auditorRoleHasReadOnlyAccessAndCannotMutate` |
 | `SEC-AUTHZ-004` | Admin Ledger Bypass | Authorization | Critical | MITIGATED | DB Trigger `forbid_ledger_entry_mutation` | `ledgerEntriesAreStrictlyAppendOnly` |
@@ -935,14 +942,14 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 | `SEC-DATA-001` | SQL Injection | Database | Critical | MITIGATED | Spring Data JPA Parameterized Queries | `duplicateEmailRegistrationFailsGracefully` |
 | `SEC-DATA-002` | Audit Log Tampering | Database | High | MITIGATED | DB Trigger `audit_logs_immutability_trg` | `auditLogsAreImmutableInDatabase` |
 | `SEC-DATA-003` | Test DB Operations on Production | Database | High | MITIGATED | `TestDatabaseGuard`, `application-test.properties`| Verified in all test executions |
-| `SEC-DATA-004` | Database Over-Privileged User | Database | High | MITIGATED | Role separation (`ledgerline_app` vs `ledgerline_runtime`) | `runtimeUserCannotDirectlyUpdateBalance` |
+| `SEC-DATA-004` | Database Over-Privileged User | Database | High | MITIGATED | Role separation (`ledgerline_app` vs `ledgerline_runtime`, V8/V9) | `runtimeRoleCatalogAttributesAssertLeastPrivilege`, `runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert` |
 | `SEC-APP-001` | Information Disclosure in Errors | Application | Low | MITIGATED | `@RestControllerAdvice` `ApiExceptionHandler` | `loginRateLimiterBlocksExcessiveAttemptsWith429` |
 | `SEC-APP-002` | Insecure Mass Assignment | Application | High | MITIGATED | Strict Request Records (`RegisterRequest`) | `publicRegistrationCreatesCustomerRoleOnly` |
 | `SEC-APP-003` | Credential Leakage in Audit Logs | Application | High | MITIGATED | Sanitized `AuditService` Metadata Builder | `authenticationAuditLogsPersistCorrectly` |
 | `SEC-APP-004` | Password Hash Exposure in Audit API | Application | Critical | MITIGATED | `AuditLogResponse` DTO with pagination | `auditLogsEndpointDoesNotExposePasswordHash` |
 | `SEC-TX-001` | Concurrent Overdraft Race Condition | Financial Engine | Critical | MITIGATED | Deterministic `FOR UPDATE` lock, balance validation | `concurrentWithdrawalsPreventOverdraft` |
 | `SEC-TX-002` | Bilateral Transfer Deadlock | Financial Engine | High | MITIGATED | Natural UUID sorted lock acquisition | `concurrentTransfersInOppositeDirectionsPreventDeadlock` |
-| `SEC-TX-003` | Duplicate Request Replay | Financial Engine | Critical | MITIGATED | `Idempotency-Key`, SHA-256 fingerprint, post-lock re-check | `concurrentDuplicateRequestsExecuteOnlyOnce` |
+| `SEC-TX-003` | Duplicate Request Replay | Financial Engine | Critical | MITIGATED | Advisory lock `pg_advisory_xact_lock`, SHA-256 fingerprint, idempotency key | `concurrentDuplicateRequestsExecuteOnlyOnce`, `sameKeySamePayloadReturnsOriginalResult` |
 | `SEC-TX-004` | Idempotency Key Reuse Conflict | Financial Engine | High | MITIGATED | Payload fingerprint matching, HTTP 409 Conflict | `sameKeyDifferentPayloadReturnsConflict` |
 | `SEC-TX-005` | Financial IDOR / Account Hijacking | Financial Engine | Critical | MITIGATED | Server-side principal ownership assertion | `customerCannotAccessAnotherCustomerAccount` |
 | `SEC-TX-006` | System Cash Vault Extraction | Financial Engine | Critical | MITIGATED | System account type isolation, HTTP 403 | `customerCannotAccessSystemAccount` |
