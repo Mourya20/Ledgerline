@@ -248,7 +248,7 @@ Authentication occurs through `POST /api/v1/auth/login`. After successful login,
    - Prohibited from accessing customer banking operations (`POST /api/v1/accounts`, `POST /api/v1/transactions/**` return HTTP 403 Forbidden).
 3. **ADMIN** (`/admin`):
    - Central Administration Control Center with live platform health inspection (`GET /actuator/health`) and aggregate banking stats (`GET /api/v1/admin/stats`).
-   - Privileged Customer Account Provisioning: Open new deposit accounts (`0.00 INR` normal `CREDIT` balance) and assign them directly to any customer (`POST /api/v1/accounts`).
+   - Privileged Customer Account Provisioning: Open new deposit accounts (`0.00 INR` normal `CREDIT` balance) and assign them directly to any customer, auditor, or provision a new customer on-the-fly with an assigned Customer ID (`POST /api/v1/accounts`).
    - Customer Account Lifecycle Management: Inspect all customer accounts across the bank, query individual balances, and freeze, unfreeze, or close accounts (`PATCH /api/v1/admin/accounts/{id}/status`).
    - User Identity & Security Management: Inspect all registered users across roles, view account counts, and suspend/disable or re-activate compromised users (`PATCH /api/v1/admin/users/{id}/status`).
    - Bank-Wide Transaction Inspection: Full visibility into double-entry ledger transactions across all accounts with debit/credit breakdown (`GET /api/v1/transactions`).

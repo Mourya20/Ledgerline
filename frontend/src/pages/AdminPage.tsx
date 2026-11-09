@@ -32,6 +32,12 @@ const DEMO_CUSTOMERS = [
   'customer12@ledgerline.com',
 ];
 
+const DEMO_AUDITORS: string[] = [
+  'auditor1@ledgerline.com',
+  'auditor2@ledgerline.com',
+  'auditor3@ledgerline.com',
+];
+
 type AdminTab = 'overview' | 'accounts' | 'users' | 'transactions' | 'deposit';
 
 export const AdminPage: React.FC = () => {
@@ -57,9 +63,13 @@ export const AdminPage: React.FC = () => {
 
   // Account creation form state
   const [targetEmail, setTargetEmail] = useState<string>('');
+  const [targetCustomerId, setTargetCustomerId] = useState<string>('');
+  const [targetCustomerPassword, setTargetCustomerPassword] = useState<string>('');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState<boolean>(false);
   const [creatingAccount, setCreatingAccount] = useState<boolean>(false);
   const [createAccountSuccess, setCreateAccountSuccess] = useState<AccountResponse | null>(null);
   const [createAccountError, setCreateAccountError] = useState<string | null>(null);
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
 
   // Users state
   const [users, setUsers] = useState<UserSummaryResponse[]>([]);
@@ -190,8 +200,9 @@ export const AdminPage: React.FC = () => {
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     const email = targetEmail.trim();
-    if (!email) {
-      setCreateAccountError('Please provide a target customer email address.');
+    const customerId = targetCustomerId.trim();
+    if (!email && !customerId) {
+      setCreateAccountError('Please provide a target customer or auditor email address, or specify an ID.');
       return;
     }
 
@@ -202,12 +213,17 @@ export const AdminPage: React.FC = () => {
     try {
       const created = await accountsApi.createAccount({
         currency: 'INR',
-        customerEmail: email,
+        customerEmail: email || undefined,
+        customerId: customerId || (email ? (users.find(u => u.email.toLowerCase() === email.toLowerCase())?.id || crypto.randomUUID()) : undefined),
+        customerPassword: targetCustomerPassword.trim() || undefined,
       });
       setCreateAccountSuccess(created);
       setTargetEmail('');
+      setTargetCustomerId('');
+      setTargetCustomerPassword('');
       await fetchAccounts();
       await fetchStats();
+      await fetchUsers();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create and assign account.';
       setCreateAccountError(msg);
@@ -657,11 +673,11 @@ export const AdminPage: React.FC = () => {
                     Privileged Action
                   </span>
                   <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: 0 }}>
-                    Create & Assign Customer Account
+                    Open & Assign Account (Customer or Auditor)
                   </h2>
                 </div>
                 <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>
-                  Open a new deposit account in the double-entry ledger and assign it directly to any customer.
+                  Open a new deposit account in the ledger. Assign it to an existing customer or auditor, or provision a new customer on-the-fly with an assigned Customer ID.
                 </p>
               </div>
 
@@ -672,14 +688,13 @@ export const AdminPage: React.FC = () => {
                     list={customerListId}
                     value={targetEmail}
                     onChange={(e) => setTargetEmail(e.target.value)}
-                    placeholder="Enter customer email (e.g. customer1@ledgerline.com)"
+                    placeholder="Enter customer or auditor email (existing or new)"
                     className="input-field"
                     style={{ flex: 1, minWidth: '260px' }}
-                    required
                     disabled={creatingAccount}
                   />
                   <datalist id={customerListId}>
-                    {DEMO_CUSTOMERS.map((email) => (
+                    {DEMO_CUSTOMERS.concat(DEMO_AUDITORS).map((email) => (
                       <option key={email} value={email} />
                     ))}
                   </datalist>
@@ -698,22 +713,79 @@ export const AdminPage: React.FC = () => {
                   <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={creatingAccount || !targetEmail.trim()}
+                    disabled={creatingAccount || (!targetEmail.trim() && !targetCustomerId.trim())}
                     style={{ minWidth: '180px' }}
                   >
-                    {creatingAccount ? 'Creating Account...' : 'Create & Assign'}
+                    {creatingAccount ? 'Opening Account...' : 'Open & Assign'}
                   </button>
                 </div>
 
-                {/* Quick Select demo customer chips */}
+                {/* Advanced Provisioning Options Toggle */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#0D6E64',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      padding: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontWeight: 500
+                    }}
+                  >
+                    {showAdvancedOptions ? '▾ Hide ID & Password Options' : '▸ Custom Customer ID & Password (for new customer)'}
+                  </button>
+
+                  {showAdvancedOptions && (
+                    <div style={{ marginTop: '10px', padding: '12px', backgroundColor: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: '6px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: '240px' }}>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#4B5563', marginBottom: '4px' }}>
+                          Custom Customer ID (UUID)
+                        </label>
+                        <input
+                          type="text"
+                          value={targetCustomerId}
+                          onChange={(e) => setTargetCustomerId(e.target.value)}
+                          placeholder="e.g. 11111111-2222-3333-4444-555555555555 (auto-generated if empty)"
+                          className="input-field"
+                          style={{ width: '100%', fontSize: '12px', fontFamily: 'monospace' }}
+                          disabled={creatingAccount}
+                        />
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: '220px' }}>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#4B5563', marginBottom: '4px' }}>
+                          Initial Password (new customer only)
+                        </label>
+                        <input
+                          type="text"
+                          value={targetCustomerPassword}
+                          onChange={(e) => setTargetCustomerPassword(e.target.value)}
+                          placeholder="Default: Password123!"
+                          className="input-field"
+                          style={{ width: '100%', fontSize: '12px' }}
+                          disabled={creatingAccount}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Select demo customer and auditor chips */}
                 <div>
                   <span style={{ fontSize: '12px', color: '#6B7280', marginRight: '6px' }}>Quick select:</span>
                   <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {DEMO_CUSTOMERS.slice(0, 8).map((email) => (
+                    <span style={{ fontSize: '11px', color: '#4B5563', alignSelf: 'center', marginRight: '2px' }}>Customers:</span>
+                    {DEMO_CUSTOMERS.slice(0, 6).map((email) => (
                       <button
                         key={email}
                         type="button"
-                        onClick={() => setTargetEmail(email)}
+                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); }}
                         disabled={creatingAccount}
                         style={{
                           padding: '2px 8px',
@@ -722,6 +794,27 @@ export const AdminPage: React.FC = () => {
                           border: '1px solid #D1D5DB',
                           backgroundColor: targetEmail === email ? '#E0F2FE' : '#FFFFFF',
                           color: targetEmail === email ? '#0369A1' : '#374151',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {email.split('@')[0]}
+                      </button>
+                    ))}
+
+                    <span style={{ fontSize: '11px', color: '#4B5563', alignSelf: 'center', marginLeft: '6px', marginRight: '2px' }}>Auditors:</span>
+                    {DEMO_AUDITORS.map((email) => (
+                      <button
+                        key={email}
+                        type="button"
+                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); }}
+                        disabled={creatingAccount}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: '11px',
+                          borderRadius: '4px',
+                          border: '1px solid #FCD34D',
+                          backgroundColor: targetEmail === email ? '#FEF3C7' : '#FFFFFF',
+                          color: targetEmail === email ? '#92400E' : '#374151',
                           cursor: 'pointer'
                         }}
                       >
@@ -741,9 +834,33 @@ export const AdminPage: React.FC = () => {
                 {/* Success Card */}
                 {createAccountSuccess && (
                   <div style={{ backgroundColor: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: '8px', padding: '14px', color: '#065F46' }}>
-                    <strong style={{ fontSize: '13px', color: '#047857' }}>
-                      ✓ Account {createAccountSuccess.accountNumber} successfully assigned to {createAccountSuccess.ownerEmail}!
-                    </strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <strong style={{ fontSize: '14px', color: '#047857' }}>
+                        ✓ Account {createAccountSuccess.accountNumber} opened and assigned to {createAccountSuccess.ownerEmail}!
+                      </strong>
+                    </div>
+                    {createAccountSuccess.ownerId && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#065F46' }}>
+                        <span>Customer / User ID:</span>
+                        <code style={{ fontFamily: 'monospace', fontWeight: 600, backgroundColor: '#D1FAE5', padding: '2px 6px', borderRadius: '4px' }}>
+                          {createAccountSuccess.ownerId}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (createAccountSuccess.ownerId) {
+                              navigator.clipboard.writeText(createAccountSuccess.ownerId);
+                              setCopiedUserId(createAccountSuccess.ownerId);
+                              setTimeout(() => setCopiedUserId(null), 2000);
+                            }
+                          }}
+                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px', fontSize: '12px' }}
+                          title="Copy User ID"
+                        >
+                          {copiedUserId === createAccountSuccess.ownerId ? '✓ Copied' : '📋 Copy ID'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </form>
@@ -846,15 +963,22 @@ export const AdminPage: React.FC = () => {
                             {acc.accountNumber}
                           </td>
                           <td style={{ padding: '10px 14px', color: '#374151' }}>
-                            {acc.ownerEmail || '—'}
-                            {isDemoAccount(acc.ownerEmail) ? (
-                              <span style={{ marginLeft: '6px', fontSize: '10px', backgroundColor: '#E0F2FE', color: '#0369A1', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                                Demo
-                              </span>
-                            ) : (
-                              <span style={{ marginLeft: '6px', fontSize: '10px', backgroundColor: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: '4px' }}>
-                                Dev
-                              </span>
+                            <div>
+                              {acc.ownerEmail || '—'}
+                              {isDemoAccount(acc.ownerEmail) ? (
+                                <span style={{ marginLeft: '6px', fontSize: '10px', backgroundColor: '#E0F2FE', color: '#0369A1', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                  Demo
+                                </span>
+                              ) : (
+                                <span style={{ marginLeft: '6px', fontSize: '10px', backgroundColor: '#F3F4F6', color: '#6B7280', padding: '1px 6px', borderRadius: '4px' }}>
+                                  Dev
+                                </span>
+                              )}
+                            </div>
+                            {acc.ownerId && (
+                              <div style={{ fontSize: '11px', color: '#9CA3AF', fontFamily: 'monospace', marginTop: '2px' }}>
+                                ID: {acc.ownerId.substring(0, 8)}...
+                              </div>
                             )}
                           </td>
                           <td style={{ padding: '10px 14px', fontWeight: 600, color: '#111827' }}>
@@ -1005,6 +1129,7 @@ export const AdminPage: React.FC = () => {
                   <thead>
                     <tr style={{ borderBottom: '1px solid #E5E7EB', textAlign: 'left', color: '#4B5563', backgroundColor: '#F9FAFB' }}>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Email Address</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>User ID</th>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>System Role</th>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Accounts Owned</th>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Status</th>
@@ -1030,6 +1155,25 @@ export const AdminPage: React.FC = () => {
                             )}
                           </td>
                           <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <code style={{ fontFamily: 'monospace', fontSize: '11px', backgroundColor: '#F3F4F6', padding: '2px 6px', borderRadius: '4px', color: '#374151' }}>
+                                {u.id.substring(0, 8)}...
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(u.id);
+                                  setCopiedUserId(u.id);
+                                  setTimeout(() => setCopiedUserId(null), 2000);
+                                }}
+                                style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px', fontSize: '12px' }}
+                                title={`Copy full User ID (${u.id})`}
+                              >
+                                {copiedUserId === u.id ? '✓' : '📋'}
+                              </button>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
                             <span
                               className={
                                 u.role === 'ADMIN'
@@ -1044,7 +1188,7 @@ export const AdminPage: React.FC = () => {
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', color: '#374151' }}>
-                            {u.role === 'CUSTOMER' ? (
+                            {u.accountCount > 0 ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span style={{ fontWeight: 600 }}>{u.accountCount}</span>
                                 <button
@@ -1055,6 +1199,22 @@ export const AdminPage: React.FC = () => {
                                   title={`Inspect accounts owned by ${u.email}`}
                                 >
                                   View Accounts &rarr;
+                                </button>
+                              </div>
+                            ) : (u.role === 'CUSTOMER' || u.role === 'AUDITOR') ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: '#9CA3AF' }}>0</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTargetEmail(u.email);
+                                    setTargetCustomerId(u.id);
+                                    setActiveTab('accounts');
+                                  }}
+                                  style={{ padding: '2px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid #D1D5DB', backgroundColor: '#F9FAFB', cursor: 'pointer', color: '#374151' }}
+                                  title={`Open & assign bank account to ${u.email}`}
+                                >
+                                  + Assign Account
                                 </button>
                               </div>
                             ) : (

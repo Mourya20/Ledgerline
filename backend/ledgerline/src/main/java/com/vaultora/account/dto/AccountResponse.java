@@ -16,10 +16,15 @@ public record AccountResponse(
     AccountStatus status,
     BigDecimal balance,
     Instant createdAt,
-    String ownerEmail
+    String ownerEmail,
+    UUID ownerId
 ) {
     public AccountResponse(UUID id, String accountNumber, AccountType accountType, String currency, AccountStatus status, BigDecimal balance, Instant createdAt) {
-        this(id, accountNumber, accountType, currency, status, balance, createdAt, null);
+        this(id, accountNumber, accountType, currency, status, balance, createdAt, null, null);
+    }
+
+    public AccountResponse(UUID id, String accountNumber, AccountType accountType, String currency, AccountStatus status, BigDecimal balance, Instant createdAt, String ownerEmail) {
+        this(id, accountNumber, accountType, currency, status, balance, createdAt, ownerEmail, null);
     }
 
     public static AccountResponse fromEntity(AccountEntity entity) {
@@ -31,7 +36,8 @@ public record AccountResponse(
             entity.getStatus(),
             entity.getBalance(),
             entity.getCreatedAt(),
-            entity.getOwner() != null ? entity.getOwner().getEmail() : null
+            entity.getOwner() != null ? entity.getOwner().getEmail() : null,
+            entity.getOwner() != null ? entity.getOwner().getId() : null
         );
     }
 }

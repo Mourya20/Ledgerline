@@ -16,6 +16,7 @@ export interface AccountResponse {
   status: AccountStatus;
   createdAt: string;
   ownerEmail?: string | null;
+  ownerId?: string | null;
 }
 
 export interface AccountBalanceResponse {
@@ -82,6 +83,8 @@ export interface TransferRequest {
 export interface CreateAccountRequest {
   currency?: string;
   customerEmail?: string;
+  customerId?: string;
+  customerPassword?: string;
 }
 
 export interface LoginRequest {

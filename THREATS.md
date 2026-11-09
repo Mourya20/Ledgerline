@@ -1039,6 +1039,7 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 | `SEC-SYS-002` | Arbitrary System Account Misuse | Financial Integrity | High | MITIGATED | Strict validation of canonical `SYS-INR-CASH-VAULT-001` | `depositFailsIfSystemAccountMisconfigured` |
 | `SEC-PRIV-002` | Counterpart Privacy Leakage | Data Privacy | Medium | MITIGATED | Viewer-aware DTO masking (`****1234`, null UUIDs) | `transferResponseMasksCounterpartForSenderAndReceiver` |
 | `SEC-CFG-002` | Hardcoded Fallback Credentials | Configuration | High | MITIGATED | Removed fallback passwords, separate `APP_DB_*` and `FLYWAY_DB_*` | Verified runtime & migration startup |
+| `SEC-AUTHZ-007` | Unprivileged Customer Creation Escalation | Application | High | MITIGATED | Forced `CUSTOMER` role & BCrypt hash on dynamic admin customer onboarding | `adminCanOpenAccountForNonExistingCustomerWithAutoAssignedId` |
 
 ---
 

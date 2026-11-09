@@ -196,4 +196,75 @@ public class AccountManagementIntegrationTests {
                 .session(session))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    @DisplayName("Admin can open bank account for non-existing customer with auto-assigned ID")
+    void adminCanOpenAccountForNonExistingCustomerWithAutoAssignedId() throws Exception {
+        MockHttpSession session = createSession(admin);
+        String newEmail = "new_auto_customer_" + System.nanoTime() + "@vaultora.com";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"currency\":\"INR\",\"customerEmail\":\"%s\",\"customerId\":\"%s\"}", newEmail, UUID.randomUUID())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerEmail").value(newEmail))
+                .andExpect(jsonPath("$.ownerId").isNotEmpty())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.balance").value(0.00));
+
+        UserEntity createdUser = userRepository.findByEmailIgnoreCase(newEmail).orElseThrow();
+        assertEquals(UserRole.CUSTOMER, createdUser.getRole());
+        assertEquals(UserStatus.ACTIVE, createdUser.getStatus());
+    }
+
+    @Test
+    @DisplayName("Admin can open bank account for non-existing customer with explicit custom ID")
+    void adminCanOpenAccountForNonExistingCustomerWithExplicitCustomId() throws Exception {
+        MockHttpSession session = createSession(admin);
+        UUID customId = UUID.randomUUID();
+        String newEmail = "new_custom_customer_" + System.nanoTime() + "@vaultora.com";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"currency\":\"INR\",\"customerEmail\":\"%s\",\"customerId\":\"%s\"}", newEmail, customId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerEmail").value(newEmail))
+                .andExpect(jsonPath("$.ownerId").value(customId.toString()));
+
+        UserEntity createdUser = userRepository.findById(customId).orElseThrow();
+        assertEquals(newEmail.toLowerCase(java.util.Locale.ROOT), createdUser.getEmail());
+    }
+
+    @Test
+    @DisplayName("Admin can open bank account and assign it to an AUDITOR")
+    void adminCanOpenAccountAndAssignToAuditor() throws Exception {
+        MockHttpSession session = createSession(admin);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"currency\":\"INR\",\"customerEmail\":\"%s\",\"customerId\":\"%s\"}", auditor.getEmail(), auditor.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerEmail").value(auditor.getEmail()))
+                .andExpect(jsonPath("$.ownerId").value(auditor.getId().toString()))
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    @DisplayName("Admin can filter accounts by customerId")
+    void adminCanFilterAccountsByCustomerId() throws Exception {
+        MockHttpSession session = createSession(admin);
+
+        mockMvc.perform(get("/api/v1/accounts?customerId=" + customer1.getId())
+                .session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].ownerEmail").value(customer1.getEmail()))
+                .andExpect(jsonPath("$[0].ownerId").value(customer1.getId().toString()));
+    }
 }

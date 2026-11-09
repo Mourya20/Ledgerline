@@ -20,6 +20,7 @@ export const AccountsPage: React.FC = () => {
   // Account closure / deletion state
   const [accountToClose, setAccountToClose] = useState<AccountResponse | null>(null);
   const [isClosingAccount, setIsClosingAccount] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   // Filter state
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
@@ -68,6 +69,7 @@ export const AccountsPage: React.FC = () => {
     try {
       setIsClosingAccount(true);
       setError(null);
+      setCloseError(null);
       setSuccessMessage(null);
 
       const closed = await accountsApi.closeAccount(accountToClose.id);
@@ -75,11 +77,13 @@ export const AccountsPage: React.FC = () => {
       setSuccessMessage(`Account ${maskAccountNumber(closed.accountNumber)} has been closed successfully.`);
       await fetchAccounts();
     } catch (err: unknown) {
-      if (err instanceof ApiException) {
-        setError(err.message || 'Failed to close account.');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to close account.');
-      }
+      const msg = err instanceof ApiException
+        ? err.message || 'Failed to close account.'
+        : err instanceof Error
+          ? err.message
+          : 'Failed to close account.';
+      setCloseError(msg);
+      setError(msg);
     } finally {
       setIsClosingAccount(false);
     }
@@ -305,6 +309,7 @@ export const AccountsPage: React.FC = () => {
                         }
                         onClick={() => {
                           if (isZeroBalance) {
+                            setCloseError(null);
                             setAccountToClose(account);
                           } else {
                             setError(
@@ -480,11 +485,20 @@ export const AccountsPage: React.FC = () => {
               <strong>Important Notice:</strong> Once closed, this account can no longer receive or initiate deposits, transfers, or withdrawals. Account transaction history will remain accessible for statement inspection.
             </div>
 
+            {closeError && (
+              <div className="alert alert-danger" role="alert" style={{ marginBottom: '16px', fontSize: '13px' }}>
+                {closeError}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
                 className="btn-outline"
-                onClick={() => setAccountToClose(null)}
+                onClick={() => {
+                  setAccountToClose(null);
+                  setCloseError(null);
+                }}
                 disabled={isClosingAccount}
               >
                 Cancel

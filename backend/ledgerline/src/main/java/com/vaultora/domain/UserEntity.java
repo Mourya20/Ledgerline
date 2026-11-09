@@ -42,16 +42,23 @@ public class UserEntity {
     protected UserEntity() {
     }
 
-    public UserEntity(String email, String passwordHash, UserRole role) {
-        this.id = UUID.randomUUID();
+    public UserEntity(UUID id, String email, String passwordHash, UserRole role) {
+        this.id = (id != null) ? id : UUID.randomUUID();
         this.email = email;
         this.passwordHash = passwordHash;
         this.role = role;
         this.status = UserStatus.ACTIVE;
     }
 
+    public UserEntity(String email, String passwordHash, UserRole role) {
+        this(UUID.randomUUID(), email, passwordHash, role);
+    }
+
     @PrePersist
     void onCreate() {
+        if (this.id == null) {
+            this.id = UUID.randomUUID();
+        }
         Instant now = Instant.now();
         createdAt = now;
         updatedAt = now;
