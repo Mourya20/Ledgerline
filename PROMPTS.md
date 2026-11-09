@@ -315,7 +315,7 @@ Execute comprehensive remediation of Phase 2 financial engine on branch `feature
   - Verified strict system counterpart property validation.
   - Verified validation rejections for scale > 2, negative amount, key > 255 chars, invalid currency.
 - Executed full Maven test suite (`mvnw.cmd test`): **84 total tests run, 0 failures, 0 errors, 0 skipped**.
-- All changes remain unstaged and uncommitted on branch `feature/phase-2-financial-engine`.
+- The above Phase 2 financial transaction engine and audit remediation was committed in commit `b5a0e97` (`feat: finished Phase-2 Financial Transaction Engine`).
 
 ---
 
@@ -366,4 +366,57 @@ An independent source-code audit identified remaining security boundaries and fi
   - `rateLimitExceededGeneratesAuditLog()`: verified database persistence of `AUTH_RATE_LIMIT_EXCEEDED`.
 - **Maven Test Suite**:
   - Executed `.\backend\ledgerline\mvnw.cmd test`: **89 tests run, 0 failures, 0 errors, 0 skipped**.
-- All changes remain unstaged and uncommitted on branch `feature/phase-2-financial-engine`.
+- The above Phase 2 financial transaction engine and audit remediation was committed in commit `b5a0e97` (`feat: finished Phase-2 Financial Transaction Engine`).
+
+---
+
+## 9. Final Targeted Remediation & Verification
+
+### Context & Objectives
+A final targeted hardening pass was performed to ensure production-grade security, catalog regression detection, clean domain exceptions, accurate technical documentation, and verified deployment procedures:
+1. **Runtime Database Credential Protection**:
+   - Analyzed historical migration V6: uses `IF NOT EXISTS` check for role `ledgerline_runtime`.
+   - Created hardened fresh-installation entrypoint script `docker/initdb/01-init-runtime-role.sh` mounted via `docker-compose.yml` (`/docker-entrypoint-initdb.d:ro`). The script fails immediately if `APP_DB_PASSWORD` is absent or empty, preventing silent fallbacks. It uses psql `\getenv` and `format('CREATE ROLE ... WITH LOGIN PASSWORD %L ...', :'runtime_pwd')` with `\gexec` to safely quote passwords containing apostrophes or special characters without command-line exposure or raw interpolation.
+   - Enforced `APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env}` in `docker-compose.yml`.
+   - Removed hardcoded fallback secrets (`ledgerline_runtime_secret`) from both `Phase1IntegrationTests.java` and `Phase2FinancialEngineIntegrationTests.java`, replacing them with environment-driven `@Value("${ledgerline.runtime.password}")` checks that fail fast if unset without logging credentials.
+   - Documented explicit, non-destructive password rotation procedures for existing database volumes using PostgreSQL's interactive `\password ledgerline_app` and `\password ledgerline_runtime`.
+2. **Automated PostgreSQL Catalog Privilege Assertions**:
+   - Added 6 dedicated automated catalog tests in `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests` querying PostgreSQL system catalogs directly:
+     - `runtimeRoleCatalogAttributesAssertLeastPrivilege`: asserts `rolsuper = false`, `rolinherit = false`, `rolcreaterole = false`, `rolcreatedb = false`, `rolcanlogin = true` (`pg_roles`).
+     - `runtimeRoleHasZeroRoleMemberships`: asserts 0 role memberships or administrative options (`pg_auth_members`).
+     - `databaseTablesAreOwnedByMigrationRoleAndNotRuntime`: asserts all schema tables are owned by `ledgerline_app` and 0 by `ledgerline_runtime` (`pg_tables`).
+     - `runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert`: asserts only `INSERT` and `SELECT` are granted, with 0 `DELETE`, `TRUNCATE`, or table-level `UPDATE` (`role_table_grants`).
+     - `runtimeRoleColumnGrantsLimitUpdateStrictly`: asserts column `UPDATE` is strictly limited to `(status, updated_at)` on `users` and `accounts`, and `(status, completed_at)` on `ledger_transactions` (`role_column_grants`).
+     - `schemaPublicHasNoCreatePrivilegeForRuntimeOrPublic`: asserts `CREATE` is revoked on schema `public` (`pg_namespace`).
+3. **Domain Exception Precision**:
+   - Created `TransactionNotFoundException.java` and mapped it to HTTP 404 in `ApiExceptionHandler.java`.
+   - Updated `TransactionService.getTransactionById` to throw `TransactionNotFoundException` instead of `AccountNotFoundException`.
+4. **Account Ownership Boundary Analysis**:
+   - Validated that the application layer is the authoritative identity boundary asserting `account.getOwner().getId().equals(authenticatedUserId)` for all operations, while the database boundary guarantees relational ownership integrity (`owner_user_id IS NOT NULL`, zero initial balance, non-negative checks, zero-sum invariants).
+5. **Technical Accuracy Synchronization**:
+   - Documented idempotency advisory locking accurately: `TransactionService` computes a 64-bit integer from SHA-256 (`userId + ":" + normalizedKey`) and passes it as `:lockKey` to `SELECT pg_advisory_xact_lock(:lockKey)`.
+   - Documented rate limiting accurately: `LoginRateLimiter` uses a synchronized, access-ordered `LinkedHashMap` with LRU eviction bounded at 10,000 tracked keys.
+   - Documented trigger protection accurately: `protect_account_balance_projection()` uses PostgreSQL call-stack diagnostic inspection (`GET DIAGNOSTICS v_context = PG_CONTEXT;`).
+   - Documented concurrency guarantees accurately: deterministic account locking in natural UUID alphabetical order reduces lock-order deadlock risks.
+   - Documented schema tables accurately: `users`, `accounts`, `ledger_transactions`, `ledger_entries`, `audit_logs` (idempotency stored directly in `ledger_transactions`).
+6. **Documentation & Traceability Synchronization**:
+   - Synchronized `README.md` (V1–V9 migrations, verified 103 test count, fresh-install, manual, and existing-volume provisioning procedures, role separation, runtime role application integration suite).
+   - Synchronized `THREATS.md` (Trust Boundary 4 V1–V9, `SEC-AUTH-005` session user validation filter, `SEC-AUTHZ-001` account ownership resolution, `SEC-DATA-004` column-level restrictions, `SEC-TX-003` advisory-locking idempotency, traceability matrix).
+7. **Runtime Role Application Integration Test & JPA Column Immutability**:
+   - Implemented `RuntimeRoleApplicationIntegrationTest.java` (8 tests) testing full application operations (registration, account creation, deposit, withdrawal, transfer, transaction history, and prohibited operation security denials) directly under restricted PostgreSQL role `ledgerline_runtime`.
+   - Annotated immutable columns in `LedgerTransactionEntity`, `AccountEntity`, and `UserEntity` with `updatable = false` so Hibernate dirty checking generates SQL updates matching PostgreSQL's column-level grants (`role_column_grants`) for `ledgerline_runtime`.
+
+### Verification
+- **Automated Test Execution**:
+  - `.\backend\ledgerline\mvnw.cmd clean verify -f backend/ledgerline/pom.xml`:
+    - `com.ledgerline.LedgerlineApplicationTests`: 1 test, 0 failures, 0 errors.
+    - `com.ledgerline.Phase1IntegrationTests`: 31 tests, 0 failures, 0 errors.
+    - `com.ledgerline.Phase2FinancialEngineIntegrationTests`: 53 tests, 0 failures, 0 errors.
+    - `com.ledgerline.RuntimeRoleApplicationIntegrationTest`: 8 tests, 0 failures, 0 errors.
+    - `com.ledgerline.auth.LoginRateLimiterTest`: 6 tests, 0 failures, 0 errors.
+    - `com.ledgerline.auth.validation.MaxUtf8BytesValidatorTest`: 4 tests, 0 failures, 0 errors.
+    - **Total Tests Run**: **103**, Failures: **0**, Errors: **0**, Skipped: **0**.
+    - **Build Result**: `BUILD SUCCESS`.
+- **Repository & Branch Status**:
+  - The core Phase 2 financial engine and audit remediation was committed in `b5a0e97` (`feat: finished Phase-2 Financial Transaction Engine`).
+  - This final targeted remediation, configuration synchronization (`DB_PASSWORD` single source of truth, `APP_DB_PASSWORD` role separation), catalog test additions, runtime role application integration suite (103 total tests), and documentation alignment represents the active local correction pass in the working tree on `feature/phase-2-financial-engine`. All changes are preserved unstaged for review.
