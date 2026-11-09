@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: ledgerline-backend
+    runtime: docker
+    dockerfilePath: backend/ledgerline/Dockerfile
+    dockerContext: backend/ledgerline
+    plan: starter
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: APP_DB_URL
+        fromDatabase:
+          name: ledgerline-postgres
+          property: connectionString
+      - key: APP_DB_USERNAME
+        fromDatabase:
+          name: ledgerline-postgres
+          property: user
+      - key: APP_DB_PASSWORD
+        fromDatabase:
+          name: ledgerline-postgres
+          property: password
+      - key: FLYWAY_DB_URL
+        fromDatabase:
+          name: ledgerline-postgres
+          property: connectionString
+      - key: FLYWAY_DB_USERNAME
+        fromDatabase:
+          name: ledgerline-postgres
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: ledgerline-postgres
+          property: password
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAME_SITE
+        value: "none"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+databases:
+  - name: ledgerline-postgres
+    databaseName: ledgerline_db
+    user: ledgerline_app
+    plan: starter

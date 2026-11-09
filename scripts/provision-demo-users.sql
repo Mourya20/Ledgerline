@@ -1,0 +1,13 @@
+-- LedgerLine Production Demonstration Provisioning Reference
+-- Must be executed by the database administrator (ledgerline_app / database owner)
+-- DO NOT execute under ledgerline_runtime (which is blocked by trigger trg_protect_user_role_assignment)
+--
+-- Recommended provisioning method:
+-- Run the idempotent Java provisioning tool using migration credentials:
+--   mvn exec:java -Dexec.mainClass="com.ledgerline.provision.DemoProvisioningTool"
+--
+-- The tool automatically:
+-- 1. Provisions 16 demonstration users (12 CUSTOMER, 3 AUDITOR, 1 ADMIN) with dynamic BCrypt hashes.
+-- 2. Provisions 19 customer accounts (7 x 2 accounts, 5 x 1 account) with 0.00 INR normal CREDIT balance.
+-- 3. Generates the confidential evaluator credential sheet at private/demo-credentials.local.md (ignored by Git).
+-- 4. Never embeds static passwords or precomputed hashes in version control.

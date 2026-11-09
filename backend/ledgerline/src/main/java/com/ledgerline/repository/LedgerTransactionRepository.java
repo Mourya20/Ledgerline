@@ -29,4 +29,12 @@ public interface LedgerTransactionRepository extends JpaRepository<LedgerTransac
 
     @Query("SELECT CASE WHEN COUNT(e) > 0 THEN true ELSE false END FROM LedgerEntryEntity e WHERE e.transaction.id = :transactionId AND e.account.owner.id = :userId")
     boolean isUserInvolvedInTransaction(@Param("transactionId") UUID transactionId, @Param("userId") UUID userId);
+
+    @Query("SELECT DISTINCT t FROM LedgerTransactionEntity t " +
+           "JOIN LedgerEntryEntity e ON e.transaction = t " +
+           "WHERE e.account.id = :accountId " +
+           "ORDER BY t.createdAt DESC")
+    Page<LedgerTransactionEntity> findByAccountId(@Param("accountId") UUID accountId, Pageable pageable);
+
+    Page<LedgerTransactionEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

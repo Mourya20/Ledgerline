@@ -276,6 +276,79 @@ public class Phase2FinancialEngineIntegrationTests {
             mockMvc.perform(get("/api/v1/accounts/" + SYSTEM_CASH_VAULT_ID).session(session))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        @DisplayName("Admin can create an account and assign it to a customer")
+        void adminCanCreateAndAssignAccountToCustomer() throws Exception {
+            UserEntity customer = createAndAuthenticateUser("target_customer@example.com", UserRole.CUSTOMER);
+            createAndAuthenticateUser("admin_creator@example.com", UserRole.ADMIN);
+            MockHttpSession adminSession = loginSession("admin_creator@example.com", "Password123!");
+
+            MvcResult result = mockMvc.perform(post("/api/v1/accounts")
+                    .session(adminSession)
+                    .with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"target_customer@example.com\"}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.accountNumber").isNotEmpty())
+                    .andExpect(jsonPath("$.currency").value("INR"))
+                    .andExpect(jsonPath("$.balance").value(0.00))
+                    .andExpect(jsonPath("$.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.ownerEmail").value("target_customer@example.com"))
+                    .andReturn();
+
+            UUID accountId = UUID.fromString(JsonPath.read(result.getResponse().getContentAsString(), "$.id"));
+            AccountEntity persisted = accountRepository.findById(accountId).orElseThrow();
+            assertEquals(customer.getId(), persisted.getOwner().getId(), "Account owner must be the target customer");
+            assertEquals(AccountType.CUSTOMER, persisted.getAccountType());
+        }
+
+        @Test
+        @DisplayName("Admin cannot assign an account to non-existent or non-customer user")
+        void adminCannotAssignAccountToInvalidCustomer() throws Exception {
+            createAndAuthenticateUser("auditor_target@example.com", UserRole.AUDITOR);
+            createAndAuthenticateUser("admin_checker@example.com", UserRole.ADMIN);
+            MockHttpSession adminSession = loginSession("admin_checker@example.com", "Password123!");
+
+            // 1. Non-existent email -> 400 Bad Request
+            mockMvc.perform(post("/api/v1/accounts")
+                    .session(adminSession)
+                    .with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"nonexistent@example.com\"}"))
+                    .andExpect(status().isBadRequest());
+
+            // 2. AUDITOR target -> 400 Bad Request
+            mockMvc.perform(post("/api/v1/accounts")
+                    .session(adminSession)
+                    .with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"auditor_target@example.com\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("Admin can list all customer accounts and filter by customer email")
+        void adminCanListAndFilterCustomerAccounts() throws Exception {
+            UserEntity customer1 = createAndAuthenticateUser("cust_list1@example.com", UserRole.CUSTOMER);
+            UserEntity customer2 = createAndAuthenticateUser("cust_list2@example.com", UserRole.CUSTOMER);
+            createAccountForUser(customer1, "INR");
+            createAccountForUser(customer2, "INR");
+
+            createAndAuthenticateUser("admin_lister@example.com", UserRole.ADMIN);
+            MockHttpSession adminSession = loginSession("admin_lister@example.com", "Password123!");
+
+            // List all customer accounts
+            mockMvc.perform(get("/api/v1/accounts").session(adminSession))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(2));
+
+            // Filter by customer1
+            mockMvc.perform(get("/api/v1/accounts?customerEmail=cust_list1@example.com").session(adminSession))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].ownerEmail").value("cust_list1@example.com"));
+        }
     }
 
     // =========================================================================

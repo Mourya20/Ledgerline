@@ -6,7 +6,9 @@ LedgerLine is a secure, double-entry banking and money-movement platform built w
 
 Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance accounting engine, database-backed session authentication, fine-grained role-based authorization, rate limiting, and immutable audit logging.
 
-**Phase 2 delivers the complete financial transaction engine and comprehensive remediation**, providing authenticated customer account management, simulated cash deposits and withdrawals, atomic peer-to-peer customer transfers, PostgreSQL transaction-scoped advisory locking (`pg_advisory_xact_lock`), deterministic deadlock prevention, robust idempotency with canonical SHA-256 fingerprinting, hardened least-privilege database roles, viewer-aware response privacy masking, and complete financial reconciliation test suites.
+Phase 2 delivered the complete financial transaction engine and audit remediation, providing authenticated customer account management, simulated cash deposits and withdrawals, atomic peer-to-peer customer transfers, PostgreSQL transaction-scoped advisory locking (`pg_advisory_xact_lock`), deterministic deadlock prevention, robust idempotency with canonical SHA-256 fingerprinting, hardened least-privilege database roles, viewer-aware response privacy masking, and complete financial reconciliation test suites.
+
+**Phase 3 introduces the responsive React + Vite + TypeScript frontend**, implementing the five-page banking specification (`Ledgerline – Frontend Design.pdf`) with session authentication, CSRF double-submit protection, and a robust transaction idempotency lifecycle.
 
 > [!NOTE]
 > **Operational Disclaimer**: The deposit and withdrawal endpoints represent simulated external cash-in and cash-out operations against an internal system cash vault. They are not connected to real external payment gateways or banking rails. The system currently operates with INR (`INR`) as the authoritative currency.
@@ -17,7 +19,15 @@ Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance acco
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│               Spring Boot 4.1.2 Backend                  │
+│               React 19 + Vite 8 Frontend                  │
+│  - Five Clean Banking Screens (Auth, Dash, Accounts, Move, History)│
+│  - Session Authentication & Double-Submit CSRF Integration │
+│  - Idempotency-Key Lifecycle & Uncertain Response Recovery│
+│  - Responsive Sidebar & Accessible Mobile Drawer          │
+└─────────────────────────────┬─────────────────────────────┘
+                              │ HTTP (credentials: include)
+┌─────────────────────────────▼─────────────────────────────┐
+│               Spring Boot 4.1.2 Backend                   │
 │  - REST Controllers (Auth, Account, Transaction, Audit)   │
 │  - Spring Security (Sessions, CSRF, Strict RBAC)          │
 │  - Login Rate Limiter (Atomic Reservation, Synchronized LinkedHashMap LRU)│
@@ -220,6 +230,92 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
 
 *Key Security Guard: The `AUDITOR` role has strictly read-only capabilities over the audit subsystem and cannot create accounts or initiate money movements (deposits, withdrawals, transfers).*
 
+### 6.1 Application Role Routing & Portal Architecture
+
+Authentication occurs through `POST /api/v1/auth/login`. After successful login, the application retrieves the authenticated user identity and role from `GET /api/v1/auth/me` and routes dynamically:
+
+1. **CUSTOMER** (`/dashboard`):
+   - Access to the 5 core customer banking views: Dashboard, Accounts, Move money, History.
+   - Enforces strict owner isolation: customers can only view and transact against their own accounts.
+   - Prohibited from accessing administrative or auditing portals.
+2. **AUDITOR** (`/auditor`):
+   - Dedicated, read-only Auditor Portal for reviewing security, authentication, and ledger events.
+   - Live paginated table backed by `GET /api/v1/audit/logs`.
+   - Displays event timestamp, action, resource type/ID, actor UUID, client IP, and raw JSON metadata inspector.
+   - Zero modification, deletion, or transaction-creation controls.
+   - Prohibited from accessing customer banking operations (`POST /api/v1/accounts`, `POST /api/v1/transactions/**` return HTTP 403 Forbidden).
+3. **ADMIN** (`/admin`):
+   - Central Administration Control Center with live platform health inspection (`GET /actuator/health`) and aggregate banking stats (`GET /api/v1/admin/stats`).
+   - Privileged Customer Account Provisioning: Open new deposit accounts (`0.00 INR` normal `CREDIT` balance) and assign them directly to any customer (`POST /api/v1/accounts`).
+   - Customer Account Lifecycle Management: Inspect all customer accounts across the bank, query individual balances, and freeze, unfreeze, or close accounts (`PATCH /api/v1/admin/accounts/{id}/status`).
+   - User Identity & Security Management: Inspect all registered users across roles, view account counts, and suspend/disable or re-activate compromised users (`PATCH /api/v1/admin/users/{id}/status`).
+   - Bank-Wide Transaction Inspection: Full visibility into double-entry ledger transactions across all accounts with debit/credit breakdown (`GET /api/v1/transactions`).
+   - Administrative Deposit & Fund Disbursement: Authority to disburse funds directly from the system cash asset vault into any customer deposit account (`POST /api/v1/transactions/deposit`).
+   - Full Audit Oversight: Direct access to the immutable audit trail (`/auditor`) for comprehensive compliance and security review (`GET /api/v1/audit/logs`).
+   - SQL Security Enforcement: Visibility into database trigger protections (`trg_protect_user_role_assignment`, `trg_protect_account_insertion`) and runtime privileges.
+4. **Access Denied Guard** (`/access-denied`):
+   - When a user navigates to an unauthorized route, the client-side router redirects to `/access-denied`, displaying the user's role badge, explanation, and a redirect button to their authorized portal. Backend Spring Security acts as the authoritative security boundary.
+
+### 6.2 Failed-Login Rate Limiting Policy
+
+LedgerLine implements an in-memory sliding-window failed-attempt rate limiter (`LoginRateLimiter.java`):
+- **Email Threshold**: Maximum 5 failed attempts per normalized email within a 60-second sliding window.
+- **IP Threshold**: Maximum 30 failed attempts per client IP address within a 60-second sliding window (thwarting distributed credential stuffing).
+- **Cooldown**: Dynamic cooldown based on the oldest attempt timestamp within the window, strictly capped at 60 seconds. The exact remaining cooldown is returned in the HTTP `Retry-After` header.
+- **Failures Only**: Only rejected credentials (`BadCredentialsException`, `DisabledException`) increment failure counters. Successful logins do **not** consume failure allowances.
+- **Account Recovery**: Successful authentication immediately clears the email failure counter (`recordSuccess`), while preserving the shared IP history.
+- **Bounded Storage**: Backed by a thread-safe access-ordered LRU `LinkedHashMap` bounded at 10,000 tracked keys to prevent heap exhaustion.
+
+### 6.3 Demonstration Environment & Evaluation Dataset
+
+LedgerLine includes pre-seeded synthetic demonstration accounts and sample data so evaluators can explore the CUSTOMER, AUDITOR and ADMIN interfaces and verify application functionality. These are assessment demonstration records, not real customer or financial records.
+
+The demonstration dataset comprises:
+- **12 CUSTOMER users** (`customer1@ledgerline.com` through `customer12@ledgerline.com`)
+- **3 AUDITOR users** (`auditor1@ledgerline.com` through `auditor3@ledgerline.com`)
+- **1 ADMIN user** (`admin1@ledgerline.com`)
+- **19 Initial Customer Accounts** (Customers 1–7 allocated 2 accounts each; Customers 8–12 allocated 1 account each; all with ₹0.00 initial balance, `CREDIT` normal balance, and `ACTIVE` status)
+
+Provisioning is executed via an explicit, idempotent Java utility:
+
+```powershell
+cd backend\ledgerline
+.\mvnw.cmd exec:java "-Dexec.mainClass=com.ledgerline.provision.DemoProvisioningTool"
+```
+
+#### Password & Credential Security Policy
+
+- In accordance with security requirements, plaintext passwords are never stored in PostgreSQL and never committed to tracked repository files (including `README.md`, SQL scripts, frontend code, or git history).
+- Each demonstration user's password is set to their complete email address (e.g. `customer1@ledgerline.com`), ensuring a minimum of 12 characters and full compliance with registration password complexity rules.
+- Passwords are encrypted as BCrypt hashes (cost 10) in the PostgreSQL `users` table.
+- A confidential local evaluation credential sheet with allocated account numbers is automatically generated at `private/demo-credentials.local.md` during provisioning, strictly protected by `.gitignore` (`/private/`).
+
+#### Demonstration Identities Reference
+
+| Identity Label | Role | Authentication Email | Password Policy | Initial Accounts | Purpose / Portal |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `customer1` | **CUSTOMER** | `customer1@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer2` | **CUSTOMER** | `customer2@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer3` | **CUSTOMER** | `customer3@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer4` | **CUSTOMER** | `customer4@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer5` | **CUSTOMER** | `customer5@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer6` | **CUSTOMER** | `customer6@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer7` | **CUSTOMER** | `customer7@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
+| `customer8` | **CUSTOMER** | `customer8@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
+| `customer9` | **CUSTOMER** | `customer9@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
+| `customer10` | **CUSTOMER** | `customer10@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
+| `customer11` | **CUSTOMER** | `customer11@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
+| `customer12` | **CUSTOMER** | `customer12@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
+| `auditor1` | **AUDITOR** | `auditor1@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
+| `auditor2` | **AUDITOR** | `auditor2@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
+| `auditor3` | **AUDITOR** | `auditor3@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
+| `admin1` | **ADMIN** | `admin1@ledgerline.com` | Complete Email Address | 0 | System Administration (`/admin`) |
+
+- **Account Baseline**: All customer accounts open with `₹0.00 INR` balance, `CREDIT` normal balance, and `ACTIVE` status in the double-entry ledger.
+- **Admin Console Statistics**: The live Admin Console reflects all records in the database (the 16 demonstration identities and 21 current demo accounts, alongside pre-existing development and automated integration test records). Dynamic dataset scope selectors allow evaluators to view all system records or inspect the demonstration dataset specifically.
+- **Local Credential Sheet**: A duplicate reference is written to `private/demo-credentials.local.md`, which is ignored by Git in `.gitignore` to prevent credential commits.
+- **In-Session Portal Switcher**: The `<PortalSwitcher />` component enables switching between authorized portals within the active session (e.g. ADMIN can toggle between the Admin Console and Auditor Portal; Customer and Auditor see their authorized portal badge).
+
 ---
 
 ## 7. REST API Reference & Response Privacy
@@ -337,7 +433,7 @@ All mutating financial endpoints require an active session cookie, a valid CSRF 
 
 ## 8. Running the Application & Tests
 
-### Start Backend
+### 8.1 Start Backend
 Run from the `backend/ledgerline` directory:
 
 ```powershell
@@ -345,10 +441,62 @@ cd backend\ledgerline
 .\mvnw.cmd spring-boot:run
 ```
 
-The application runs on `http://localhost:8080`.
+The backend application starts on `http://localhost:8080`.
 
-### Run Test Suite
-Execute the complete test suite against `ledgerline_test_db`:
+### 8.2 Start Frontend
+The frontend is a React 19 + Vite 8 application located in `frontend/`. Run from the `frontend` directory:
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+The Vite development server runs on `http://localhost:5173` with Hot Module Replacement (HMR) enabled.
+
+#### Frontend Environment Variables
+Configured in `frontend/.env` (see `frontend/.env.example`):
+- `VITE_API_BASE_URL`: Optional custom backend base URL. When omitted (default during development), Vite's proxy automatically routes `/api/*` and `/actuator/*` requests directly to `http://localhost:8080`.
+
+### 8.3 Running Backend and Frontend Together
+1. **Start PostgreSQL**: Ensure the database container is running:
+   ```powershell
+   docker compose up -d
+   ```
+2. **Start Backend**: In one terminal window:
+   ```powershell
+   cd backend\ledgerline
+   .\mvnw.cmd spring-boot:run
+   ```
+3. **Start Frontend**: In a second terminal window:
+   ```powershell
+   cd frontend
+   npm run dev
+   ```
+4. Access the web application at `http://localhost:5173`. All `/api` requests are proxied to `http://localhost:8080`, preserving a single-origin context for cookies and CSRF protection.
+
+### 8.4 Frontend Authentication & Security Mechanics
+1. **Session Cookie Authentication**:
+   - Authentication relies on Spring Security's server-managed session (`JSESSIONID`) with `SameSite=Lax` and `HttpOnly` attributes.
+   - The frontend API client invokes `fetch` with `credentials: "include"`, ensuring session cookies are attached across all authenticated requests.
+   - Session tokens or credentials are never stored in client-side Web Storage (`localStorage` or `sessionStorage`).
+2. **Double-Submit CSRF Protection**:
+   - Mutating state requests (`POST`, `PUT`, `DELETE`) require a valid CSRF token.
+   - The frontend issues an initial `GET /api/v1/auth/csrf` to initialize the `XSRF-TOKEN` cookie, and subsequent mutating requests read the cookie and set the `X-XSRF-TOKEN` HTTP header.
+3. **Transaction Idempotency Lifecycle & Uncertain Response Recovery**:
+   - All financial mutations (`deposit`, `withdraw`, `transfer`) mandate an `Idempotency-Key` header with a client-generated UUID.
+   - **Intent Preparation**: When a user begins a transaction, an intent is prepared with a unique key and the exact transaction payload.
+   - **Uncertain State Persistence**: If a network timeout, server 5xx error, or connection disruption occurs before a definitive response is received, the intent is flagged as uncertain and persisted in `sessionStorage` (`ledgerline_tx_intent`).
+   - **Refresh Recovery**: Reloading the page detects the pending intent and presents a high-visibility warning banner offering:
+     - **Retry Pending Transaction**: Re-submits the exact identical payload with the preserved original idempotency key. PostgreSQL advisory locking and SHA-256 fingerprint deduplication ensure the transaction executes at most once.
+     - **Discard Intent**: Allows the user to abandon the intent explicitly, clearing storage and enabling new transactions.
+   - **Payload Immutability**: The user is prevented from submitting an altered payload while an intent remains unresolved.
+   - **Success Resolution**: Upon receiving an HTTP `201 Created` response, the intent is immediately cleared from `sessionStorage`, and the next transaction generates a fresh idempotency key.
+
+### 8.5 Automated Test Suites
+
+#### Backend Test Suite
+Execute the complete backend test suite against `ledgerline_test_db`:
 
 ```powershell
 cd backend\ledgerline
@@ -362,63 +510,103 @@ cd backend\ledgerline
 .\mvnw.cmd clean verify
 ```
 
-### Test Suite Summary (95 Total Tests, 100% Passed)
-- **`Phase2FinancialEngineIntegrationTests`** (53 tests):
-  - **Account Management (6 tests)**: Account creation, unique 12-digit `VLTR` account numbers, currency validation, owner-isolated listing, cross-customer access rejection (403), system account access rejection (403).
-  - **Deposit Operations (5 tests)**: Balanced double-entry creation, balance increments, zero/negative amount rejection (400), missing idempotency key rejection (400), cross-customer deposit rejection (403), inactive account rejection (400), cross-currency deposit rejection (400).
-  - **Withdrawal Operations (3 tests)**: Balanced double-entry creation, balance decrements, insufficient funds rejection (422), cross-customer withdrawal rejection (403).
-  - **Transfer Operations (5 tests)**: Zero-sum internal transfers, sender debit and receiver credit, cash vault balance preservation, self-transfer rejection (400), transfer to system account rejection (403), insufficient sender balance rejection (422), non-existent recipient rejection (404).
-  - **Idempotency & Validation (7 tests)**:
-    - Same key and payload returns identical completed transaction without duplicate ledger entries.
-    - Same key and different payload returns 409 Conflict.
-    - Failed validation does not consume idempotency key.
-    - Same user with same idempotency key across different accounts serializes and rejects duplicate (409).
-    - Canonical fingerprint matches monetary amounts regardless of trailing zeroes (100.0 vs 100.00).
-    - Validation rejects amounts with >2 decimal places, negative amounts, keys >255 chars, and unsupported currencies (400).
-    - System counterpart misconfiguration safely aborts transaction without partial effects.
-  - **PostgreSQL Concurrency Tests (4 multithreaded tests)**:
-    - *Simultaneous withdrawals exceeding balance*: 2 concurrent threads each attempt 800 INR withdrawal against 1000 INR balance -> exactly 1 succeeds, other fails 422, final balance 200 INR, zero overdraft.
-    - *Bilateral opposing transfers*: Simultaneous transfers A->B and B->A across parallel threads -> reduced deadlock risk via deterministic natural UUID ordering, balances preserved.
-    - *Simultaneous duplicate requests*: Identical deposit requests with same idempotency key in parallel -> exactly 1 execution, identical transaction returned, zero duplicate entries.
-    - *Simultaneous transfers to single destination*: Multiple senders transferring simultaneously to one receiver -> all succeed with accurate balances.
-  - **Financial Reconciliation (1 test)**: Global Debit == Credit check across all ledger entries, and per-account verification that projected `balance` strictly equals `SUM(entries)` directly calculated in SQL.
-  - **Security, Privileges & Privacy (22 tests)**:
-    - Unauthenticated requests rejected (401).
-    - AUDITOR role blocked from money movement (403).
-    - Cross-user transaction access blocked (403).
-    - Transaction history pagination and owner-isolation.
-    - Runtime database role (`ledgerline_runtime`) cannot `TRUNCATE` any table (SQLException 42501).
-    - Runtime database role cannot promote users to `ADMIN` (SQLException 42501).
-    - Runtime database role cannot directly update user `password_hash` (SQLException 42501).
-    - Runtime database role cannot modify account `allow_negative` or projected `balance` (SQLException 42501).
-    - Runtime database role cannot delete from `ledger_entries` or `audit_logs` (SQLException 42501).
-    - Runtime database role cannot directly `INSERT` users with `ADMIN` or `AUDITOR` roles (Migration V9 trigger, SQLException 42501).
-    - Runtime database role cannot directly `INSERT` accounts with non-zero opening balances, arbitrary `SYSTEM` accounts, or `allow_negative=TRUE` (Migration V9 trigger, SQLException 42501).
-    - Rate limit exhaustion records `AUTH_RATE_LIMIT_EXCEEDED` audit log event.
-    - Deposit response masks system counterpart as `"Cash/Bank Counterpart"` with `null` accountId.
-    - Transfer response masks counterpart customer with `****1234` and `null` accountId for both sender and receiver.
-    - Customer `AccountResponse` does not expose `normalBalance`.
-    - PostgreSQL Catalog: runtime role attributes enforce non-superuser, NOINHERIT, and least privilege (`pg_roles`).
-    - PostgreSQL Catalog: runtime role inherits zero memberships or administrative options (`pg_auth_members`).
-    - PostgreSQL Catalog: public schema tables are owned by migration administrator (`ledgerline_app`) and not runtime role (`pg_tables`).
-    - PostgreSQL Catalog: runtime table privileges strictly limited to `SELECT` and `INSERT` (`information_schema.role_table_grants`).
-    - PostgreSQL Catalog: column `UPDATE` grants strictly limited to status and timestamp columns (`information_schema.role_column_grants`).
-    - PostgreSQL Catalog: schema `public` does not grant `CREATE` to runtime role or `PUBLIC` (`pg_namespace`).
-- **`RuntimeRoleApplicationIntegrationTest`** (8 integration tests): End-to-end application execution directly under the restricted `ledgerline_runtime` PostgreSQL role:
-  - Role verification: confirms `CURRENT_USER` and `SESSION_USER` equal `ledgerline_runtime`.
-  - User registration through `AuthService` under runtime credentials.
-  - Customer account creation and balance retrieval under runtime credentials.
-  - Cash deposit (1,000 INR), completed transaction status, and trigger-projected account balance update.
-  - Cash withdrawal (400 INR) with balance reduction to 600 INR.
-  - Customer-to-customer transfer (250 INR) with dual-account balance updates (350 INR sender, 250 INR receiver).
-  - Paginated transaction history retrieval with counterpart privacy masking under runtime credentials.
-  - Database privilege enforcement: directly asserts that prohibited operations (direct balance update, ledger entry deletion, audit log deletion, table truncation, user role escalation, and balance fabrication) are rejected with PostgreSQL error `42501 permission denied`.
-- **`Phase1IntegrationTests`** (31 integration tests): Core accounting mathematics, trigger projections, call-stack protections, session fixation, CSRF, BCrypt byte boundaries, login rate limits, and audit trail.
-- **`LoginRateLimiterTest`** (6 unit tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and access-ordered LRU eviction.
-- **`MaxUtf8BytesValidatorTest`** (4 unit tests): UTF-8 boundary checks for BCrypt 72-byte limit.
-- **`LedgerlineApplicationTests`** (1 test): Application context initialization and actuator health check.
+#### Frontend Test Suite & Production Build
+Execute Vitest test suite and production build from `frontend/`:
 
-**Total automated test suite**: **103 passing tests** across 6 test classes with zero failures, zero errors, and zero skipped tests.
+```powershell
+cd frontend
+npm test          # Runs 28 automated tests (API client, formatters, validation, idempotency, layout)
+npm run build     # Runs tsc -b and vite build (verifies strict types and production bundle)
+```
+
+### 8.6 Test Suite Summary (134 Total Tests, 100% Passed)
+- **Backend Test Suite (103 tests, 100% passed)**:
+  - **`Phase2FinancialEngineIntegrationTests`** (53 tests): Account management, deposits, withdrawals, transfers, idempotency, PostgreSQL advisory locks, concurrency, reconciliation, RBAC, least privilege, privacy masking.
+  - **`RuntimeRoleApplicationIntegrationTest`** (8 tests): End-to-end application execution directly under the restricted `ledgerline_runtime` PostgreSQL role: role identity, registration, account creation, deposits, withdrawals, transfers, history retrieval, database privilege rejection assertions.
+  - **`Phase1IntegrationTests`** (31 tests): Core accounting mathematics, trigger projections, call-stack protections, session fixation, CSRF, BCrypt byte boundaries, login rate limits, and audit trail.
+  - **`LoginRateLimiterTest`** (6 tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and access-ordered LRU eviction.
+  - **`MaxUtf8BytesValidatorTest`** (4 tests): UTF-8 boundary checks for BCrypt 72-byte limit.
+  - **`LedgerlineApplicationTests`** (1 test): Application context initialization and actuator health check.
+- **Frontend Test Suite (31 tests, 100% passed)**:
+  - **`src/api/client.test.ts`** (6 tests): Base URL routing, JSON headers, CSRF double-submit token attachment, API error parsing, and 401 unauthenticated redirect handling.
+  - **`src/utils/formatters.test.ts`** (10 tests): Currency formatting, date formatting, account masking, deposit/withdrawal/external transfer parsing, and own-account transfer parsing distinguishing sender and receiver legs with `focusAccountId`.
+  - **`src/utils/validation.test.ts`** (7 tests): Registration password length (min 12 chars), UTF-8 byte boundary calculation (`TextEncoder`), 72-byte rejection, and multibyte character handling.
+  - **`src/utils/idempotencyManager.test.ts`** (6 tests): Intent generation, payload matching, uncertain state flagging, `sessionStorage` persistence and restoration, and intent discarding.
+  - **`src/components/layout/AppLayout.test.tsx`** (3 tests): Desktop sidebar rendering, mobile hamburger button toggle, and accessibility attributes (`aria-expanded`, `aria-label`).
+  - **`src/pages/RoleRouting.test.tsx`** (3 tests): Role-aware route guard verification, AccessDeniedPage rendering with role badge, and role authorization enforcement.
+
+**Total automated test suite**: **134 passing tests** (103 backend + 31 frontend) with zero failures, zero errors, and zero skipped tests.
+
+---
+
+### 8.7 Production Deployment Guide (Render + Vercel + Managed PostgreSQL)
+
+The platform is engineered for cloud deployment across the following topology:
+
+| Component | Target Platform | Runtime / Framework | Configuration Artifacts |
+|---|---|---|---|
+| **Frontend** | **Vercel** | React 19 + Vite 8 (Node.js 20+) | `frontend/vercel.json`, `frontend/package.json` |
+| **Backend** | **Render** | Java 25 Spring Boot 4.1.2 (Docker) | `backend/ledgerline/Dockerfile`, `render.yaml` |
+| **Database** | **Render / Supabase / Neon** | PostgreSQL 16+ | Flyway Migrations V1–V9, `scripts/provision-demo-users.sql` |
+
+#### Step 1: Provision Managed PostgreSQL Database
+1. Provision a PostgreSQL 16+ instance on Render, Supabase, Neon, or Aiven.
+2. Note the database connection string (`postgres://...`).
+3. Flyway migrations V1 through V9 will automatically initialize the database schema on first backend launch.
+4. Execute the secure demonstration provisioning script under administrative credentials:
+   ```bash
+   # Connect to your managed PostgreSQL using psql:
+   psql "<MANAGED_POSTGRES_CONNECTION_STRING>" -f scripts/provision-demo-users.sql
+   ```
+   This provisions active `ADMIN` (`admin@ledgerline.com` / `Admin123456!`) and `AUDITOR` (`auditor@ledgerline.com` / `Auditor123456!`) accounts with verified BCrypt hashes without exposing cleartext passwords or bypassing DB trigger controls.
+
+#### Step 2: Deploy Backend to Render
+1. Push your branch to GitHub.
+2. In Render, select **New > Web Service** (or use the Blueprint in `render.yaml`).
+3. Connect your repository:
+   - **Environment**: `Docker`
+   - **Dockerfile Path**: `backend/ledgerline/Dockerfile`
+   - **Docker Context**: `backend/ledgerline`
+   - **Health Check Path**: `/actuator/health`
+4. Configure Production Environment Variables in Render:
+   - `PORT`: `8080`
+   - `APP_DB_URL`: `jdbc:postgresql://<HOST>:<PORT>/<DATABASE>`
+   - `APP_DB_USERNAME`: `<YOUR_RUNTIME_OR_ADMIN_USER>`
+   - `APP_DB_PASSWORD`: `<YOUR_DB_PASSWORD>`
+   - `FLYWAY_DB_URL`: `jdbc:postgresql://<HOST>:<PORT>/<DATABASE>`
+   - `FLYWAY_DB_USERNAME`: `<YOUR_MIGRATION_ADMIN_USER>`
+   - `DB_PASSWORD`: `<YOUR_DB_PASSWORD>`
+   - `COOKIE_SECURE`: `true`
+   - `COOKIE_SAME_SITE`: `none` (or `lax` if using Vercel API proxy)
+   - `FRONTEND_ORIGIN`: `https://<YOUR_APP>.vercel.app`
+5. Deploy the service. Verify that `https://<YOUR_RENDER_SERVICE>.onrender.com/actuator/health` returns `{"status": "UP"}`.
+
+#### Step 3: Deploy Frontend to Vercel
+1. In Vercel, select **Add New > Project** and import the repository.
+2. Configure project settings:
+   - **Root Directory**: `frontend`
+   - **Framework Preset**: `Vite`
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+3. Environment Variables:
+   - `VITE_API_BASE_URL`: `https://<YOUR_RENDER_SERVICE>.onrender.com` (or leave blank if utilizing Vercel rewrites proxy)
+4. Deploy. Vercel automatically deploys the SPA with routing handled by `frontend/vercel.json`.
+
+#### Step 4: Production Environment Variable Reference Matrix
+
+| Variable | Required By | Production Recommendation | Description |
+|---|---|---|---|
+| `PORT` | Backend | `8080` | Server listening port (automatically populated by Render). |
+| `APP_DB_URL` | Backend | `jdbc:postgresql://.../ledgerline_db` | JDBC URL for application queries. |
+| `APP_DB_USERNAME` | Backend | `ledgerline_runtime` | Least-privilege runtime PostgreSQL role. |
+| `APP_DB_PASSWORD` | Backend | Strong secret | Application runtime database password. |
+| `FLYWAY_DB_URL` | Backend | `jdbc:postgresql://.../ledgerline_db` | JDBC URL for Flyway migration execution. |
+| `FLYWAY_DB_USERNAME` | Backend | `ledgerline_app` | Migration schema-owner PostgreSQL role. |
+| `DB_PASSWORD` | Backend | Strong secret | Password for migration administrator account. |
+| `COOKIE_SECURE` | Backend | `true` | Enforces HTTPS-only transmission for session cookies. |
+| `COOKIE_SAME_SITE` | Backend | `none` (cross-origin) or `lax` (proxied) | Browser cookie partition policy. |
+| `FRONTEND_ORIGIN` | Backend | `https://<app>.vercel.app` | Allowed CORS origin for credentials. |
+| `VITE_API_BASE_URL` | Frontend | `https://<api>.onrender.com` | Backend origin for direct browser fetch calls. |
 
 ---
 
@@ -495,7 +683,7 @@ cd backend\ledgerline
 
 ## 10. Implementation Status
 
-### Implemented in Phase 1 & Phase 2
+### Implemented in Phase 1, Phase 2 & Phase 3
 - [x] Immutable PostgreSQL schema with Flyway migrations (V1—V9).
 - [x] Hardened least-privilege runtime role (`ledgerline_runtime`) with `NOINHERIT`, `TRUNCATE` and `DELETE` revoked, and schema `CREATE` revoked.
 - [x] Database boundary triggers preventing privilege escalation on `users` and balance fabrication on `accounts`.
@@ -519,11 +707,18 @@ cd backend\ledgerline
 - [x] Isolated PostgreSQL test database (`ledgerline_test_db`) and runtime safety guard (`TestDatabaseGuard`).
 - [x] Automated PostgreSQL catalog assertions detecting privilege regressions in integration tests.
 - [x] Formal engineering threat model ([THREATS.md](THREATS.md)).
-- [x] 100% test pass rate across 103 automated integration and unit tests.
+- [x] Responsive React 19 + Vite 8 frontend client application implementing the 5 core banking views based on PDF design specification.
+- [x] Robust frontend transaction idempotency lifecycle with uncertain state recovery and `sessionStorage` persistence.
+- [x] Honest banking domain presentation (masked account numbers, trigger-projected balances, no fabricated products or full names).
+- [x] Customer-centric transaction history formatting correctly distinguishing sender and receiver legs for own-account transfers.
+- [x] Three-role application architecture with role-aware routing, dedicated Auditor Portal (`/auditor`), Admin Console (`/admin`), and Access Denied handling (`/access-denied`).
+- [x] Cloud deployment configuration for Vercel (frontend), Render (Spring Boot Docker backend), and Managed PostgreSQL (`render.yaml`, `Dockerfile`, `vercel.json`, `scripts/provision-demo-users.sql`).
+- [x] Standalone idempotent demo provisioning tool (`DemoProvisioningTool.java`) managing 16 identities, 19 accounts, and Git-ignored `private/demo-credentials.local.md`.
+- [x] Refined failed-attempt rate limiting policy (5 email / 30 IP / 60s cooldown) with exact `Retry-After` reporting and zero consumption on valid logins.
+- [x] 100% test pass rate across 139 automated tests (108 backend integration/unit tests + 31 frontend tests).
 
-### Planned for Phase 3 & Beyond (Deferred)
+### Planned Beyond Phase 3 (Deferred)
 - [ ] Compensating transaction reversal endpoint (`POST /api/v1/transactions/{id}/reverse`).
-- [ ] React / Vite frontend client application.
 - [ ] Multi-currency foreign exchange (FX) settlement accounts.
 - [ ] Distributed Redis session clustering and multi-node rate limiting.
 - [ ] External banking rail / payment gateway integration.

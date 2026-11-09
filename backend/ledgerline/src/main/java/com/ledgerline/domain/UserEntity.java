@@ -89,4 +89,12 @@ public class UserEntity {
     public void setStatus(UserStatus status) {
         this.status = status;
     }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
 }

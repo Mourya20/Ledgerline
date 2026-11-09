@@ -77,7 +77,7 @@ public class AuthController {
         }
 
         try {
-            loginRateLimiter.acquireAttempt(clientIp, request.email());
+            loginRateLimiter.checkAllowed(clientIp, request.email());
         } catch (RateLimitExceededException ex) {
             auditService.recordEventRequiresNew(null, AuditService.ACTION_RATE_LIMIT_EXCEEDED, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp, "retryAfterSeconds", ex.getRetryAfterSeconds()));
@@ -88,6 +88,7 @@ public class AuthController {
         try {
             authentication = authService.authenticate(request);
         } catch (DisabledException ex) {
+            loginRateLimiter.recordFailure(clientIp, request.email());
             String finalIp = clientIp;
             userRepository.findByEmailIgnoreCase(request.email()).ifPresent(u -> {
                 auditService.recordEventRequiresNew(u, AuditService.ACTION_DISABLED_USER_ATTEMPT, "USER", u.getId(),
@@ -95,12 +96,14 @@ public class AuthController {
             });
             throw ex;
         } catch (BadCredentialsException ex) {
+            loginRateLimiter.recordFailure(clientIp, request.email());
             auditService.recordEventRequiresNew(null, AuditService.ACTION_LOGIN_FAILURE, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp));
             throw ex;
         } catch (Exception ex) {
+            // Internal error or connection failure - do not increment failed-credential attempt counter
             auditService.recordEventRequiresNew(null, AuditService.ACTION_LOGIN_FAILURE, "USER", null,
-                    Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp));
+                    Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp, "reason", "internal_error"));
             throw ex;
         }
 

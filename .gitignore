@@ -4,5 +4,9 @@
 
 **/target/
 **/node_modules/
+**/dist/
 .idea/
 .vscode/
+
+# Protected local assessment credentials
+/private/

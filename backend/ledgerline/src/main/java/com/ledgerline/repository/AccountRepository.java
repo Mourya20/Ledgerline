@@ -18,6 +18,8 @@ public interface AccountRepository extends JpaRepository<AccountEntity, UUID> {
 
     List<AccountEntity> findAllByOwnerId(UUID ownerId);
 
+    List<AccountEntity> findAllByAccountType(AccountType accountType);
+
     Optional<AccountEntity> findByAccountNumber(String accountNumber);
 
     Optional<AccountEntity> findByIdAndOwnerId(UUID id, UUID ownerId);

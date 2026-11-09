@@ -97,7 +97,9 @@ public class TransactionService {
             return existing.get();
         }
 
-        AccountEntity customerAccount = resolveCustomerAccount(request.accountId(), user.getId());
+        AccountEntity customerAccount = user.getRole() == com.ledgerline.domain.UserRole.ADMIN
+                ? resolveCustomerAccountForAdmin(request.accountId())
+                : resolveCustomerAccount(request.accountId(), user.getId());
         AccountEntity systemAccount = resolveSystemCounterpartAccount(normalizedCurrency);
 
         if (!customerAccount.getCurrency().equalsIgnoreCase(normalizedCurrency)) {
@@ -158,10 +160,15 @@ public class TransactionService {
                 )
         );
 
-        List<TransactionEntryResponse> entryResponses = List.of(
-                TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
-                TransactionEntryResponse.fromEntity(creditEntry, user.getId())
-        );
+        List<TransactionEntryResponse> entryResponses = user.getRole() == com.ledgerline.domain.UserRole.ADMIN
+                ? List.of(
+                        TransactionEntryResponse.fromEntityForAdmin(debitEntry),
+                        TransactionEntryResponse.fromEntityForAdmin(creditEntry)
+                )
+                : List.of(
+                        TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
+                        TransactionEntryResponse.fromEntity(creditEntry, user.getId())
+                );
         return TransactionResponse.fromEntity(tx, entryResponses);
     }
 
@@ -184,7 +191,9 @@ public class TransactionService {
             return existing.get();
         }
 
-        AccountEntity customerAccount = resolveCustomerAccount(request.accountId(), user.getId());
+        AccountEntity customerAccount = user.getRole() == com.ledgerline.domain.UserRole.ADMIN
+                ? resolveCustomerAccountForAdmin(request.accountId())
+                : resolveCustomerAccount(request.accountId(), user.getId());
         AccountEntity systemAccount = resolveSystemCounterpartAccount(normalizedCurrency);
 
         if (!customerAccount.getCurrency().equalsIgnoreCase(normalizedCurrency)) {
@@ -259,10 +268,15 @@ public class TransactionService {
                 )
         );
 
-        List<TransactionEntryResponse> entryResponses = List.of(
-                TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
-                TransactionEntryResponse.fromEntity(creditEntry, user.getId())
-        );
+        List<TransactionEntryResponse> entryResponses = user.getRole() == com.ledgerline.domain.UserRole.ADMIN
+                ? List.of(
+                        TransactionEntryResponse.fromEntityForAdmin(debitEntry),
+                        TransactionEntryResponse.fromEntityForAdmin(creditEntry)
+                )
+                : List.of(
+                        TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
+                        TransactionEntryResponse.fromEntity(creditEntry, user.getId())
+                );
         return TransactionResponse.fromEntity(tx, entryResponses);
     }
 
@@ -372,10 +386,15 @@ public class TransactionService {
                 )
         );
 
-        List<TransactionEntryResponse> entryResponses = List.of(
-                TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
-                TransactionEntryResponse.fromEntity(creditEntry, user.getId())
-        );
+        List<TransactionEntryResponse> entryResponses = user.getRole() == com.ledgerline.domain.UserRole.ADMIN
+                ? List.of(
+                        TransactionEntryResponse.fromEntityForAdmin(debitEntry),
+                        TransactionEntryResponse.fromEntityForAdmin(creditEntry)
+                )
+                : List.of(
+                        TransactionEntryResponse.fromEntity(debitEntry, user.getId()),
+                        TransactionEntryResponse.fromEntity(creditEntry, user.getId())
+                );
         return TransactionResponse.fromEntity(tx, entryResponses);
     }
 
@@ -425,6 +444,47 @@ public class TransactionService {
         List<TransactionEntryResponse> entries = ledgerEntryRepository.findAllByTransactionIdOrderByCreatedAtAsc(tx.getId())
                 .stream()
                 .map(e -> TransactionEntryResponse.fromEntity(e, userId))
+                .toList();
+
+        return TransactionResponse.fromEntity(tx, entries);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<TransactionResponse> getTransactionsForAdmin(UUID accountId, Pageable pageable) {
+        int pageSize = Math.min(pageable.getPageSize(), 100);
+        Pageable cappedPageable = PageRequest.of(pageable.getPageNumber(), pageSize, pageable.getSort());
+
+        Page<LedgerTransactionEntity> transactions;
+        if (accountId != null) {
+            accountRepository.findById(accountId)
+                    .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
+            transactions = ledgerTransactionRepository.findByAccountId(accountId, cappedPageable);
+        } else {
+            transactions = ledgerTransactionRepository.findAllByOrderByCreatedAtDesc(cappedPageable);
+        }
+
+        List<UUID> txIds = transactions.getContent().stream().map(LedgerTransactionEntity::getId).toList();
+        Map<UUID, List<LedgerEntryEntity>> entriesByTxId = txIds.isEmpty()
+                ? Collections.emptyMap()
+                : ledgerEntryRepository.findAllByTransactionIdIn(txIds).stream()
+                        .collect(Collectors.groupingBy(e -> e.getTransaction().getId()));
+
+        return transactions.map(tx -> {
+            List<TransactionEntryResponse> entries = entriesByTxId.getOrDefault(tx.getId(), Collections.emptyList()).stream()
+                    .map(TransactionEntryResponse::fromEntityForAdmin)
+                    .toList();
+            return TransactionResponse.fromEntity(tx, entries);
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionResponse getTransactionByIdForAdmin(UUID transactionId) {
+        LedgerTransactionEntity tx = ledgerTransactionRepository.findById(transactionId)
+                .orElseThrow(() -> new TransactionNotFoundException("Transaction not found: " + transactionId));
+
+        List<TransactionEntryResponse> entries = ledgerEntryRepository.findAllByTransactionIdOrderByCreatedAtAsc(tx.getId())
+                .stream()
+                .map(TransactionEntryResponse::fromEntityForAdmin)
                 .toList();
 
         return TransactionResponse.fromEntity(tx, entries);
@@ -501,6 +561,17 @@ public class TransactionService {
 
         if (account.getOwner() == null || !account.getOwner().getId().equals(userId)) {
             throw new AccountAccessDeniedException("Access denied to account: " + accountId);
+        }
+
+        return account;
+    }
+
+    private AccountEntity resolveCustomerAccountForAdmin(UUID accountId) {
+        AccountEntity account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
+
+        if (account.getAccountType() != AccountType.CUSTOMER) {
+            throw new SystemAccountAccessException("Customer operations are not permitted on system accounts");
         }
 
         return account;
