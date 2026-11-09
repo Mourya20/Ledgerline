@@ -22,6 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessException;
@@ -81,6 +82,15 @@ class Phase1IntegrationTests {
 
     @Autowired
     private LoginRateLimiter loginRateLimiter;
+
+    @Value("${spring.datasource.url}")
+    private String testDbUrl;
+
+    @Value("${ledgerline.runtime.username}")
+    private String runtimeUser;
+
+    @Value("${ledgerline.runtime.password}")
+    private String runtimePassword;
 
     @BeforeEach
     void setUp() {
@@ -601,11 +611,14 @@ class Phase1IntegrationTests {
 
     @Test
     void runtimeUserPrivilegesEnforceLeastPrivilegeAndBalanceProtection() {
+        assertNotNull(runtimePassword, "ledgerline.runtime.password must be configured");
+        assertFalse(runtimePassword.isBlank(), "ledgerline.runtime.password must not be blank");
+
         DriverManagerDataSource runtimeDs = new DriverManagerDataSource();
         runtimeDs.setDriverClassName("org.postgresql.Driver");
-        runtimeDs.setUrl("jdbc:postgresql://localhost:5432/ledgerline_test_db");
-        runtimeDs.setUsername("ledgerline_runtime");
-        runtimeDs.setPassword("ledgerline_runtime_secret");
+        runtimeDs.setUrl(testDbUrl);
+        runtimeDs.setUsername(runtimeUser);
+        runtimeDs.setPassword(runtimePassword);
         JdbcTemplate runtimeJdbc = new JdbcTemplate(runtimeDs);
 
         UserEntity user = insertUser("runtime-test@example.com", UserRole.CUSTOMER);

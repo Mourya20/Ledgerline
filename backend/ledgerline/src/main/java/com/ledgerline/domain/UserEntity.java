@@ -19,14 +19,14 @@ public class UserEntity {
     @Id
     private UUID id;
 
-    @Column(nullable = false, length = 320)
+    @Column(nullable = false, length = 320, updatable = false)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
+    @Column(name = "password_hash", nullable = false, length = 255, updatable = false)
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false, length = 20, updatable = false)
     private UserRole role;
 
     @Enumerated(EnumType.STRING)

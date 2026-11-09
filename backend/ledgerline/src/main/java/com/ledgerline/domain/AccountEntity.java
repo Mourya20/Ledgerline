@@ -23,32 +23,32 @@ public class AccountEntity {
     @Id
     private UUID id;
 
-    @Column(name = "account_number", nullable = false, unique = true, length = 34)
+    @Column(name = "account_number", nullable = false, unique = true, length = 34, updatable = false)
     private String accountNumber;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "owner_user_id")
+    @JoinColumn(name = "owner_user_id", updatable = false)
     private UserEntity owner;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "account_type", nullable = false, length = 20)
+    @Column(name = "account_type", nullable = false, length = 20, updatable = false)
     private AccountType accountType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "normal_balance", nullable = false, length = 6)
+    @Column(name = "normal_balance", nullable = false, length = 6, updatable = false)
     private NormalBalance normalBalance;
 
-    @Column(name = "allow_negative", nullable = false)
+    @Column(name = "allow_negative", nullable = false, updatable = false)
     private boolean allowNegative;
 
-    @Column(nullable = false, length = 3)
+    @Column(nullable = false, length = 3, updatable = false)
     private String currency;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private AccountStatus status;
 
-    @Column(nullable = false, precision = 19, scale = 2)
+    @Column(nullable = false, precision = 19, scale = 2, updatable = false)
     private BigDecimal balance;
 
     @Column(name = "created_at", nullable = false, updatable = false)
