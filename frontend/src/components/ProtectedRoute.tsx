@@ -12,7 +12,7 @@ export const ProtectedRoute: React.FC<{
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#6B7280' }}>
-        Loading Ledgerline...
+        Loading Vaultora...
       </div>
     );
   }

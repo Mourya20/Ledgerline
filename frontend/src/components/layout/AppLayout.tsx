@@ -40,7 +40,7 @@ export const AppLayout: React.FC = () => {
             textDecoration: 'none'
           }}
         >
-          LedgerLine
+          Vaultora
         </Link>
         <button
           type="button"
@@ -67,7 +67,7 @@ export const AppLayout: React.FC = () => {
                 textDecoration: 'none'
               }}
             >
-              LedgerLine
+              Vaultora
             </Link>
           </div>
 

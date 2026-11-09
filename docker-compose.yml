@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:18
-    container_name: ledgerline-postgres
+    container_name: vaultora-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ledgerline_db

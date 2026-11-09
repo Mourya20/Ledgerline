@@ -1,10 +1,10 @@
--- LedgerLine Production Demonstration Provisioning Reference
+-- Vaultora Production Demonstration Provisioning Reference
 -- Must be executed by the database administrator (ledgerline_app / database owner)
 -- DO NOT execute under ledgerline_runtime (which is blocked by trigger trg_protect_user_role_assignment)
 --
 -- Recommended provisioning method:
 -- Run the idempotent Java provisioning tool using migration credentials:
---   mvn exec:java -Dexec.mainClass="com.ledgerline.provision.DemoProvisioningTool"
+--   mvn exec:java -Dexec.mainClass="com.vaultora.provision.DemoProvisioningTool"
 --
 -- The tool automatically:
 -- 1. Provisions 16 demonstration users (12 CUSTOMER, 3 AUDITOR, 1 ADMIN) with dynamic BCrypt hashes.

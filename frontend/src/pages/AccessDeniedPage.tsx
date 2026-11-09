@@ -53,7 +53,7 @@ export const AccessDeniedPage: React.FC = () => {
             alignItems: 'center'
           }}
         >
-          LedgerLine
+          Vaultora
         </Link>
       </header>
       <div className="card" style={{

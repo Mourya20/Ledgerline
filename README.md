@@ -1,8 +1,8 @@
-# Ledgerline
+# Vaultora
 
-**Repository:** [https://github.com/Mourya20/Ledgerline](https://github.com/Mourya20/Ledgerline)
+**Repository:** [https://github.com/Mourya20/vaultora-banking](https://github.com/Mourya20/vaultora-banking)
 
-LedgerLine is a secure, double-entry banking and money-movement platform built with Java, Spring Boot, and PostgreSQL. It enforces immutable ledger accounting, mathematical zero-sum transaction invariants, defense-in-depth security, and database-level transactional integrity.
+Vaultora is a secure, double-entry banking and money-movement platform built with Java, Spring Boot, and PostgreSQL. It enforces immutable ledger accounting, mathematical zero-sum transaction invariants, defense-in-depth security, and database-level transactional integrity.
 
 Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance accounting engine, database-backed session authentication, fine-grained role-based authorization, rate limiting, and immutable audit logging.
 
@@ -160,7 +160,7 @@ docker compose up -d
 The test suite executes exclusively against an isolated test database (`ledgerline_test_db`). When starting via Docker Compose on an empty volume, `docker/initdb/01-init-runtime-role.sh` creates `ledgerline_test_db` automatically. If initializing manually or connecting to an existing PostgreSQL instance without running the initialization script, create the database manually:
 
 ```powershell
-docker exec ledgerline-postgres psql -U ledgerline_app -d postgres -c "CREATE DATABASE ledgerline_test_db OWNER ledgerline_app;"
+docker exec vaultora-postgres psql -U ledgerline_app -d postgres -c "CREATE DATABASE ledgerline_test_db OWNER ledgerline_app;"
 ```
 
 - **Isolation Guard**: The test harness includes `TestDatabaseGuard`, a runtime safety check that asserts `current_database().equals("ledgerline_test_db")` before allowing test execution or fixture teardown. If misconfigured to point to `ledgerline_db` or production, tests abort immediately with an `IllegalStateException`.
@@ -258,7 +258,7 @@ Authentication occurs through `POST /api/v1/auth/login`. After successful login,
 
 ### 6.2 Failed-Login Rate Limiting Policy
 
-LedgerLine implements an in-memory sliding-window failed-attempt rate limiter (`LoginRateLimiter.java`):
+Vaultora implements an in-memory sliding-window failed-attempt rate limiter (`LoginRateLimiter.java`):
 - **Email Threshold**: Maximum 5 failed attempts per normalized email within a 60-second sliding window.
 - **IP Threshold**: Maximum 30 failed attempts per client IP address within a 60-second sliding window (thwarting distributed credential stuffing).
 - **Cooldown**: Dynamic cooldown based on the oldest attempt timestamp within the window, strictly capped at 60 seconds. The exact remaining cooldown is returned in the HTTP `Retry-After` header.
@@ -268,7 +268,7 @@ LedgerLine implements an in-memory sliding-window failed-attempt rate limiter (`
 
 ### 6.3 Demonstration Environment & Evaluation Dataset
 
-LedgerLine includes pre-seeded synthetic demonstration accounts and sample data so evaluators can explore the CUSTOMER, AUDITOR and ADMIN interfaces and verify application functionality. These are assessment demonstration records, not real customer or financial records.
+Vaultora includes pre-seeded synthetic demonstration accounts and sample data so evaluators can explore the CUSTOMER, AUDITOR and ADMIN interfaces and verify application functionality. These are assessment demonstration records, not real customer or financial records.
 
 The demonstration dataset comprises:
 - **12 CUSTOMER users** (`customer1@ledgerline.com` through `customer12@ledgerline.com`)
@@ -280,7 +280,7 @@ Provisioning is executed via an explicit, idempotent Java utility:
 
 ```powershell
 cd backend\ledgerline
-.\mvnw.cmd exec:java "-Dexec.mainClass=com.ledgerline.provision.DemoProvisioningTool"
+.\mvnw.cmd exec:java "-Dexec.mainClass=com.vaultora.provision.DemoProvisioningTool"
 ```
 
 #### Password & Credential Security Policy
@@ -486,7 +486,7 @@ Configured in `frontend/.env` (see `frontend/.env.example`):
 3. **Transaction Idempotency Lifecycle & Uncertain Response Recovery**:
    - All financial mutations (`deposit`, `withdraw`, `transfer`) mandate an `Idempotency-Key` header with a client-generated UUID.
    - **Intent Preparation**: When a user begins a transaction, an intent is prepared with a unique key and the exact transaction payload.
-   - **Uncertain State Persistence**: If a network timeout, server 5xx error, or connection disruption occurs before a definitive response is received, the intent is flagged as uncertain and persisted in `sessionStorage` (`ledgerline_tx_intent`).
+   - **Uncertain State Persistence**: If a network timeout, server 5xx error, or connection disruption occurs before a definitive response is received, the intent is flagged as uncertain and persisted in `sessionStorage` (`vaultora_tx_intent`).
    - **Refresh Recovery**: Reloading the page detects the pending intent and presents a high-visibility warning banner offering:
      - **Retry Pending Transaction**: Re-submits the exact identical payload with the preserved original idempotency key. PostgreSQL advisory locking and SHA-256 fingerprint deduplication ensure the transaction executes at most once.
      - **Discard Intent**: Allows the user to abandon the intent explicitly, clearing storage and enabling new transactions.
@@ -526,7 +526,7 @@ npm run build     # Runs tsc -b and vite build (verifies strict types and produc
   - **`Phase1IntegrationTests`** (31 tests): Core accounting mathematics, trigger projections, call-stack protections, session fixation, CSRF, BCrypt byte boundaries, login rate limits, and audit trail.
   - **`LoginRateLimiterTest`** (6 tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and access-ordered LRU eviction.
   - **`MaxUtf8BytesValidatorTest`** (4 tests): UTF-8 boundary checks for BCrypt 72-byte limit.
-  - **`LedgerlineApplicationTests`** (1 test): Application context initialization and actuator health check.
+  - **`VaultoraApplicationTests`** (1 test): Application context initialization and actuator health check.
 - **Frontend Test Suite (31 tests, 100% passed)**:
   - **`src/api/client.test.ts`** (6 tests): Base URL routing, JSON headers, CSRF double-submit token attachment, API error parsing, and 401 unauthenticated redirect handling.
   - **`src/utils/formatters.test.ts`** (10 tests): Currency formatting, date formatting, account masking, deposit/withdrawal/external transfer parsing, and own-account transfer parsing distinguishing sender and receiver legs with `focusAccountId`.
@@ -612,7 +612,7 @@ The platform is engineered for cloud deployment across the following topology:
 
 ## 9. Database Provisioning & Credential Security
 
-LedgerLine enforces strict role separation between schema migration management (`ledgerline_app`) and runtime application query execution (`ledgerline_runtime`):
+Vaultora enforces strict role separation between schema migration management (`ledgerline_app`) and runtime application query execution (`ledgerline_runtime`):
 
 1. **Migration Administrator (`ledgerline_app`)**:
    - In the official PostgreSQL Docker image environment (`docker-compose.yml`), `POSTGRES_USER=ledgerline_app` initializes that account as the PostgreSQL cluster superuser during initial bootstrap. This gives it the administrative authority needed to create the isolated test database (`ledgerline_test_db`) and manage role-level grants. In contrast, in a manually provisioned environment, `ledgerline_app` can be a standard non-superuser database/schema owner (`CREATE ROLE ledgerline_app WITH LOGIN CREATEDB;`).
@@ -661,7 +661,7 @@ To rotate passwords on an existing volume without exposing credentials in shell 
 
 ##### Rotating `ledgerline_app` (Migration Administrator / DB_PASSWORD):
 ```bash
-docker exec -it ledgerline-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_app"
+docker exec -it vaultora-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_app"
 ```
 Enter and confirm the new migration password interactively when prompted. Then:
 1. Update `.env`: set `DB_PASSWORD=new_admin_password`.
@@ -669,7 +669,7 @@ Enter and confirm the new migration password interactively when prompted. Then:
 
 ##### Rotating `ledgerline_runtime` (Application Runtime / APP_DB_PASSWORD):
 ```bash
-docker exec -it ledgerline-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_runtime"
+docker exec -it vaultora-postgres psql -U ledgerline_app -d ledgerline_db -c "\password ledgerline_runtime"
 ```
 Enter and confirm the new runtime password interactively when prompted. Then:
 1. Update `.env`: set `APP_DB_PASSWORD=new_runtime_password`.

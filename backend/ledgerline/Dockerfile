@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for LedgerLine Spring Boot Backend
+# Multi-stage Dockerfile for Vaultora Spring Boot Backend
 # Build stage
 FROM eclipse-temurin:25-jdk-alpine AS builder
 WORKDIR /workspace
@@ -19,10 +19,10 @@ FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
 # Run as non-root user for container security
-RUN addgroup -S ledgerline && adduser -S ledgerline -G ledgerline
-USER ledgerline:ledgerline
+RUN addgroup -S vaultora && adduser -S vaultora -G vaultora
+USER vaultora:vaultora
 
-COPY --from=builder /workspace/target/ledgerline-*.jar app.jar
+COPY --from=builder /workspace/target/vaultora-*.jar app.jar
 
 ENV PORT=8080
 EXPOSE 8080

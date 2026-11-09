@@ -77,7 +77,7 @@ export const AuditorPage: React.FC = () => {
               textDecoration: 'none'
             }}
           >
-            LedgerLine
+            Vaultora
           </Link>
           <span style={{
             fontSize: '11px',

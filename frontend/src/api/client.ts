@@ -66,7 +66,7 @@ export class ApiException extends Error {
 }
 
 /**
- * Universal authenticated fetch wrapper for the LedgerLine backend
+ * Universal authenticated fetch wrapper for the Vaultora backend
  */
 export async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();

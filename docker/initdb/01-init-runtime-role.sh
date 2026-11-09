@@ -2,7 +2,7 @@
 set -eu
 
 # ==============================================================================
-# Fresh Installation Provisioning Script for LedgerLine PostgreSQL
+# Fresh Installation Provisioning Script for Vaultora PostgreSQL
 # Executed automatically by PostgreSQL container entrypoint on an empty volume.
 # ==============================================================================
 

@@ -82,13 +82,13 @@ export const RegisterPage: React.FC = () => {
             alignItems: 'center'
           }}
         >
-          LedgerLine
+          Vaultora
         </Link>
       </header>
 
       <div className="card" style={{ width: '100%', maxWidth: '380px', padding: '32px' }}>
         <div style={{ fontSize: '13px', color: '#6B7280', fontWeight: 500, marginBottom: '6px' }}>
-          LedgerLine
+          Vaultora
         </div>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '24px' }}>
           Create account

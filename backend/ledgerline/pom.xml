@@ -8,11 +8,11 @@
 		<version>4.1.2</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.ledgerline</groupId>
-	<artifactId>ledgerline</artifactId>
+	<groupId>com.vaultora</groupId>
+	<artifactId>vaultora</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
+	<name>vaultora</name>
+	<description>Vaultora Banking System</description>
 	<url/>
 	<licenses>
 		<license/>

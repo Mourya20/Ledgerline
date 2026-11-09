@@ -343,7 +343,7 @@ export const AdminPage: React.FC = () => {
               textDecoration: 'none'
             }}
           >
-            LedgerLine
+            Vaultora
           </Link>
           <span style={{
             fontSize: '11px',

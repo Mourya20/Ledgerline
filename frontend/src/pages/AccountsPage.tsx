@@ -189,7 +189,7 @@ export const AccountsPage: React.FC = () => {
               borderTop: '1px solid #F3F4F6',
               paddingTop: '12px'
             }}>
-              Role: <strong>{user?.role || 'CUSTOMER'}</strong> &bull; Authenticated by Ledgerline banking security.
+              Role: <strong>{user?.role || 'CUSTOMER'}</strong> &bull; Authenticated by Vaultora banking security.
             </div>
           </div>
         </>

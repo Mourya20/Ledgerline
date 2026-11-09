@@ -705,8 +705,64 @@ The user requested final verification of the assessment dataset (12 CUSTOMER, 3 
    - `README.md`: Included mandatory evaluator statement, documented demonstration dataset, password policy, and updated RBAC matrix.
    - `THREATS.md`: Added `SEC-AUTH-007` (Demonstration Identity Provisioning & Privilege Isolation) and `SEC-AUTH-008` (Assessment Credential Segregation & Git Secret Protection).
 
+---
 
+## 16. 2026-11-09 - Project-Wide System Rename from LedgerLine to Vaultora
 
+### Prompt & Context
+Execute a comprehensive, project-wide rename of the application from **LedgerLine** to **Vaultora**. Target repository name is `vaultora-banking` (target remote URL: `https://github.com/Mourya20/vaultora-banking.git`). Product name is `Vaultora`, backend application `vaultora`, frontend application `vaultora`, Java package root `com.vaultora` (migrated from `com.ledgerline`), and Maven artifact ID `vaultora`.
 
+Strict constraints were enforced:
+- **No Git Commits or Pushes**: All changes remain unstaged in the working tree on branch `feature/phase-3-frontend`.
+- **Physical Database & Volume Preservation**: Do not drop or wipe `ledgerline_db`, roles `ledgerline_app` and `ledgerline_runtime`, or physical Docker volume `ledgerline_data` to preserve existing user and transaction state.
+- **Flyway Migration Immutability**: Historical migrations `V1` through `V9` remain unmodified to protect migration checksums.
+- **Demonstration Identity Contract**: Existing seeded demonstration emails (`customer1@ledgerline.com`, `auditor1@ledgerline.com`, `admin1@ledgerline.com`) and passwords remain preserved in PostgreSQL.
 
+### Implementation & System-Wide Migration
+1. **Backend Package & Code Tree Migration**:
+   - Migrated all 65 source files from `backend/ledgerline/src/main/java/com/ledgerline/` to `backend/ledgerline/src/main/java/com/vaultora/`.
+   - Migrated all 7 test files from `backend/ledgerline/src/test/java/com/ledgerline/` to `backend/ledgerline/src/test/java/com/vaultora/`.
+   - Renamed application entry point `LedgerlineApplication.java` -> `VaultoraApplication.java`.
+   - Renamed application context test `LedgerlineApplicationTests.java` -> `VaultoraApplicationTests.java`.
+   - Updated `package` and `import` declarations across all 72 `.java` files from `com.ledgerline.*` to `com.vaultora.*`.
+   - Updated fully qualified class references (e.g. `com.vaultora.domain.UserRole.ADMIN` in `TransactionController.java` and `TransactionService.java`).
+   - Cleaned up obsolete empty `com/ledgerline` directories.
+2. **Backend Build & Configuration**:
+   - `pom.xml`: Updated `<groupId>com.vaultora</groupId>`, `<artifactId>vaultora</artifactId>`, `<name>vaultora</name>`, `<description>Vaultora Banking System</description>`.
+   - `application.properties`: Updated `spring.application.name=vaultora`.
+   - `application-test.properties`: Updated `spring.application.name=vaultora-test`, added `vaultora.runtime.username` and `vaultora.runtime.password` aliases with backward-compatible fallbacks.
+   - `Dockerfile`: Updated runtime user to `vaultora:vaultora` and JAR artifact copy pattern to `vaultora-*.jar`.
+   - `DemoProvisioningTool.java`: Updated banner and generated credential header to `Vaultora Demonstration Identities`.
+3. **Frontend Application**:
+   - `package.json`: Updated `"name": "vaultora"`.
+   - `index.html`: Updated `<title>Vaultora — Banking & Money Movement</title>`.
+   - `App.tsx`: Updated boot loading message to `Loading Vaultora...`.
+   - `AppLayout.tsx`: Updated desktop sidebar and mobile header brand titles to `Vaultora` with link to `/`.
+   - `SignInPage.tsx`, `RegisterPage.tsx`, `AccessDeniedPage.tsx`, `AccountsPage.tsx`: Updated top-left header brand titles, card subtitles, and security attributions from `LedgerLine` to `Vaultora`.
+   - `AuditorPage.tsx` and `AdminPage.tsx`: Updated persistent top navigation brand links from `LedgerLine` to `Vaultora`.
+   - `client.ts`: Updated documentation comments to Vaultora backend.
+   - `ProtectedRoute.tsx` and `PublicRoute.tsx`: Updated loading indicators to `Loading Vaultora...`.
+   - `idempotencyManager.ts`: Updated `STORAGE_PREFIX` to `vaultora_tx_intent_`.
+   - `AppLayout.test.tsx`: Updated regex and test suite description to verify `Vaultora` brand link to `/`.
+   - `frontend/README.md`: Updated title, architecture, and documentation to Vaultora.
+4. **Infrastructure & Deployment Blueprints**:
+   - `render.yaml`: Updated backend service name to `vaultora-backend` and blueprint database name to `vaultora-postgres`.
+   - `docker-compose.yml`: Updated container name to `vaultora-postgres` while preserving volume `ledgerline_data` and physical database properties.
+   - `docker/initdb/01-init-runtime-role.sh`: Updated header comment to Vaultora PostgreSQL.
+   - `scripts/provision-demo-users.sql`: Updated Java invocation reference to `com.vaultora.provision.DemoProvisioningTool`.
+5. **Documentation & Security Specifications**:
+   - `README.md`: Updated project title `# Vaultora`, repository URL `https://github.com/Mourya20/vaultora-banking`, container names, test class names, and storage keys.
+   - `THREATS.md`: Updated document title `# Vaultora Threat Model & Security Architecture`, product descriptions, and all Java source code paths from `com/ledgerline/` to `com/vaultora/`.
+
+### Verification
+- **Frontend Test Suite**:
+  - `npm test`: **32 tests passed (100%)** across 6 test suites (API client, formatters, validation, idempotency, layout, role routing).
+  - `npm run build`: `tsc -b && vite build` completed with 0 errors in 274ms.
+- **Backend Build & Unit Tests**:
+  - `mvnw compile`: **BUILD SUCCESS** (all 65 source files compiled under `com.vaultora`).
+  - `mvnw test-compile`: **BUILD SUCCESS** (all 7 test files compiled under `com.vaultora`).
+  - Rate Limiter and UTF-8 Byte Validator unit tests: **15 tests run, 15 passed, 0 failures, 0 errors**.
+- **Repository Cleanliness Check**:
+  - Grep verification across all active application sources confirmed zero stale active references to `LedgerLine`.
+  - Working tree preserved clean and unstaged on `feature/phase-3-frontend`.
 

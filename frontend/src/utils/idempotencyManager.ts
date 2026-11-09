@@ -28,7 +28,7 @@ export interface TransferPayload {
   currency: string;
 }
 
-const STORAGE_PREFIX = 'ledgerline_tx_intent_';
+const STORAGE_PREFIX = 'vaultora_tx_intent_';
 
 function getStorageKey(type: TransactionType): string {
   return `${STORAGE_PREFIX}${type}`;

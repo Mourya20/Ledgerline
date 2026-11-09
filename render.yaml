@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ledgerline-backend
+    name: vaultora-backend
     runtime: docker
     dockerfilePath: backend/ledgerline/Dockerfile
     dockerContext: backend/ledgerline
@@ -11,27 +11,27 @@ services:
         value: 8080
       - key: APP_DB_URL
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: connectionString
       - key: APP_DB_USERNAME
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: user
       - key: APP_DB_PASSWORD
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: password
       - key: FLYWAY_DB_URL
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: connectionString
       - key: FLYWAY_DB_USERNAME
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: user
       - key: DB_PASSWORD
         fromDatabase:
-          name: ledgerline-postgres
+          name: vaultora-postgres
           property: password
       - key: COOKIE_SECURE
         value: "true"
@@ -41,7 +41,7 @@ services:
         sync: false
 
 databases:
-  - name: ledgerline-postgres
+  - name: vaultora-postgres
     databaseName: ledgerline_db
     user: ledgerline_app
     plan: starter

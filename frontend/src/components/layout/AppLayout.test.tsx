@@ -54,14 +54,14 @@ describe('AppLayout Component', () => {
     expect(toggleButton.textContent).toBe('☰');
   });
 
-  it('renders LedgerLine title brand linking to root home', () => {
+  it('renders Vaultora title brand linking to root home', () => {
     render(
       <MemoryRouter>
         <AppLayout />
       </MemoryRouter>
     );
 
-    const brandLinks = screen.getAllByRole('link', { name: /ledgerline/i });
+    const brandLinks = screen.getAllByRole('link', { name: /vaultora/i });
     expect(brandLinks.length).toBeGreaterThan(0);
     expect(brandLinks[0].getAttribute('href')).toBe('/');
   });

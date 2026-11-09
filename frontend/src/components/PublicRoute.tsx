@@ -8,7 +8,7 @@ export const PublicRoute: React.FC<{ children?: React.ReactNode }> = ({ children
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#6B7280' }}>
-        Loading Ledgerline...
+        Loading Vaultora...
       </div>
     );
   }

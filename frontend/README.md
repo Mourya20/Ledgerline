@@ -1,6 +1,6 @@
-# LedgerLine — Frontend Application
+# Vaultora — Frontend Application
 
-Clean, responsive banking frontend for LedgerLine implemented using React 19, Vite 8, TypeScript 7, and React Router 7 based on the five-page visual design specification (`Ledgerline – Frontend Design.pdf`).
+Clean, responsive banking frontend for Vaultora implemented using React 19, Vite 8, TypeScript 7, and React Router 7 based on the five-page visual design specification (`Ledgerline – Frontend Design.pdf`).
 
 ---
 
@@ -8,7 +8,7 @@ Clean, responsive banking frontend for LedgerLine implemented using React 19, Vi
 
 - **Node.js**: `v20.x` or `v22.x` (LTS recommended, minimum `v18.0.0+`)
 - **npm**: `v10.x+` (bundled with Node.js)
-- **Backend Service**: LedgerLine Spring Boot backend running on `http://localhost:8080` (see root `README.md`)
+- **Backend Service**: Vaultora Spring Boot backend running on `http://localhost:8080` (see root `README.md`)
 
 ---
 
@@ -102,7 +102,7 @@ frontend/
 
 3. **Transaction Idempotency Lifecycle**:
    - All financial operations (`deposit`, `withdraw`, `transfer`) use unique UUID keys in the `Idempotency-Key` request header.
-   - Uncertain outcomes (network drop, timeout, 5xx error) preserve the exact intent and payload in `sessionStorage` (`ledgerline_tx_intent`).
+   - Uncertain outcomes (network drop, timeout, 5xx error) preserve the exact intent and payload in `sessionStorage` (`vaultora_tx_intent`).
    - Reloading the page displays an unresolved intent banner with options to "Retry Pending Transaction" or "Discard Intent".
    - The user cannot submit an altered payload while an intent is pending.
    - Retries reuse the exact original key, letting backend PostgreSQL advisory locks and SHA-256 fingerprinting safely return the existing transaction.

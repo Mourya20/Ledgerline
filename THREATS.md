@@ -1,6 +1,6 @@
-# LedgerLine Threat Model & Security Architecture
+# Vaultora Threat Model & Security Architecture
 
-This document defines the engineering threat model for **LedgerLine**, an immutable double-entry banking and money movement platform. Written from the perspective of an application security engineer and financial systems auditor, it models realistic attack vectors, operational failure modes, architectural trust boundaries, defense-in-depth guarantees, and residual risks across the Phase 1 implementation and future phases.
+This document defines the engineering threat model for **Vaultora**, an immutable double-entry banking and money movement platform. Written from the perspective of an application security engineer and financial systems auditor, it models realistic attack vectors, operational failure modes, architectural trust boundaries, defense-in-depth guarantees, and residual risks across the Phase 1 implementation and future phases.
 
 ---
 
@@ -63,7 +63,7 @@ This document defines the engineering threat model for **LedgerLine**, an immuta
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-LedgerLine operates under a strict **defense-in-depth model**: the application layer serves as the primary enforcement point for user interaction and business workflows, but the **PostgreSQL database is the ultimate authority for financial integrity and ledger invariants**. No application bug, compromised service, or administrative bypass can violate the mathematical laws of the general ledger or corrupt persisted financial history.
+Vaultora operates under a strict **defense-in-depth model**: the application layer serves as the primary enforcement point for user interaction and business workflows, but the **PostgreSQL database is the ultimate authority for financial integrity and ledger invariants**. No application bug, compromised service, or administrative bypass can violate the mathematical laws of the general ledger or corrupt persisted financial history.
 
 ---
 
@@ -86,9 +86,9 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   5. **Dynamic Cooldown**: Calculates the exact remaining time until the oldest failure expires (capped at 60 seconds) and delivers it via the HTTP `Retry-After` header.
   6. **Bounded LRU Storage**: Map capacity is bounded to 10,000 tracked keys with access-ordered LRU eviction (`accessOrder = true`) and input key lengths are capped (IP 64 chars, email 255 chars) to prevent memory exhaustion DoS.
 - **Implementation Evidence**: 
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/LoginRateLimiter.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 71-105)
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java` (HTTP 429 mapping with `Retry-After`)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/LoginRateLimiter.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java` (lines 71-105)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/ApiExceptionHandler.java` (HTTP 429 mapping with `Retry-After`)
 - **Verification**: `Phase1IntegrationTests.loginRateLimitingRejectsExcessiveAttempts()`, `LoginRateLimiterTest` (11 unit tests verifying 5 email / 30 IP thresholds, non-consuming successes, atomic concurrency, and cooldown expiration)
 - **Status**: MITIGATED
 - **Residual Risk**: A high-volume distributed botnet cycling across millions of unique IP addresses could attempt 4 failures per target account before triggering per-email limits. Further mitigations (CAPTCHA challenges, geo-IP velocity analysis, and WAF rules) can be introduced at edge API gateways.
@@ -104,10 +104,10 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Authentication collision, compromised user accounts, false sense of security with long passphrases.
 - **Mitigation Strategy**: Strict pre-hashing validation using `@MaxUtf8Bytes(max = 72)` applied directly to `RegisterRequest.password` and `LoginRequest.password`. Inputs whose UTF-8 byte length exceeds 72 bytes are rejected at the HTTP request validation boundary with HTTP 400 Bad Request before ever reaching the BCrypt encoder.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/validation/MaxUtf8Bytes.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/validation/MaxUtf8BytesValidator.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/RegisterRequest.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/LoginRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/validation/MaxUtf8Bytes.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/validation/MaxUtf8BytesValidator.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/RegisterRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/LoginRequest.java`
 - **Verification**: `Phase1IntegrationTests.passwordExceeding72Utf8BytesRejectedOnRegistration()`, `MaxUtf8BytesValidatorTest`
 - **Status**: MITIGATED
 - **Residual Risk**: None for the BCrypt vector. Upgrading to Argon2id in a future release would eliminate byte-length limitations entirely.
@@ -123,8 +123,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Complete account takeover without knowing victim credentials, unauthorized access to financial accounts.
 - **Mitigation Strategy**: Explicit integration of Spring Security's `SessionFixationProtectionStrategy` in `AuthController.login()`. Upon successful authentication, the existing session is invalidated, all session attributes are migrated, and a new cryptographic session ID is generated and returned to the client in the `Set-Cookie` header.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java` (SessionAuthenticationStrategy bean)
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (line 92: `sessionAuthenticationStrategy.onAuthentication(...)`)
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java` (SessionAuthenticationStrategy bean)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java` (line 92: `sessionAuthenticationStrategy.onAuthentication(...)`)
 - **Verification**: `Phase1IntegrationTests.sessionFixationProtectionRotatesSessionId()`
 - **Status**: MITIGATED
 - **Residual Risk**: None on the application boundary. Client-side browser hygiene (preventing XSS) remains required to prevent post-authentication session token theft.
@@ -144,7 +144,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   - `server.servlet.session.cookie.secure=${COOKIE_SECURE:false}`: In production environments, forced HTTPS prevents transmission over plaintext channels.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/application.properties` (lines 14-17)
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java`
 - **Verification**: `Phase1IntegrationTests.unauthenticatedAccessToProtectedEndpointsFails()`
 - **Status**: MITIGATED
 - **Residual Risk**: Production deployments must enforce TLS 1.3 with HSTS headers so `COOKIE_SECURE=true` is guaranteed.
@@ -160,10 +160,10 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Fraudulent withdrawals from frozen accounts, disgruntled employee data exfiltration.
 - **Mitigation Strategy**: The application evaluates user status both at authentication time and on **every subsequent HTTP request** via `SessionUserValidationFilter` (`OncePerRequestFilter`). On each request with an authenticated session, the filter queries the database to confirm that the user exists, holds `UserStatus.ACTIVE`, and that their session authorities still match `"ROLE_" + user.getRole().name()`. If the user is disabled, deleted, or their role was modified mid-session, the security context is immediately cleared, the session is invalidated, and HTTP 401 Unauthorized is returned.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SessionUserValidationFilter.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 80-87)
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditService.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SessionUserValidationFilter.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java` (lines 80-87)
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditService.java`
 - **Verification**: `Phase1IntegrationTests.disabledUserCannotAuthenticate()`
 - **Status**: MITIGATED
 - **Residual Risk**: Single-instance database lookup per authenticated request adds minimal latency. Multi-node clustering without sticky sessions or distributed session store is deferred.
@@ -179,8 +179,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Unauthorized money transfers, unauthorized password changes.
 - **Mitigation Strategy**: Spring Security CSRF protection is strictly enabled using `CookieCsrfTokenRepository` with `HttpOnly=false` (enabling Single Page Applications to read the token) and `CsrfTokenRequestAttributeHandler`. All state-changing requests (`POST`, `PUT`, `DELETE`) require a valid `X-XSRF-TOKEN` header. Safe retrieval is exposed via `GET /api/v1/auth/csrf`.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java` (lines 43-48)
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 53-56)
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java` (lines 43-48)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java` (lines 53-56)
 - **Verification**: `Phase1IntegrationTests.csrfIsRequiredForStateChangingEndpoints()`
 - **Status**: MITIGATED
 - **Residual Risk**: Requires frontend integration to extract `XSRF-TOKEN` cookie and include it in request headers.
@@ -201,7 +201,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   4. **Idempotent Non-Destructive Operation**: Validates existing users and accounts; never deletes existing user data, balances, or transactions.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V9__prevent_privilege_escalation_and_balance_fabrication.sql`
-  - `backend/ledgerline/src/main/java/com/ledgerline/provision/DemoProvisioningTool.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/provision/DemoProvisioningTool.java`
 - **Verification**: Database catalog verification (16 demo identities, 19 baseline accounts, non-demo users preserved).
 - **Status**: MITIGATED
 - **Residual Risk**: Provisioning tool must only be executed by authorized system operators with access to bootstrap database credentials.
@@ -221,7 +221,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   3. **Tracked Source Sanitization**: No plaintext demonstration passwords appear in tracked SQL scripts, frontend components, `README.md`, or test suites. Demonstration passwords adhere to the user's complete email address (satisfying the >= 12 character complexity policy).
 - **Implementation Evidence**:
   - `.gitignore` (line 12: `/private/`)
-  - `backend/ledgerline/src/main/java/com/ledgerline/provision/DemoProvisioningTool.java` (lines 234-281)
+  - `backend/ledgerline/src/main/java/com/vaultora/provision/DemoProvisioningTool.java` (lines 234-281)
 - **Verification**: `git check-ignore private/demo-credentials.local.md` returns match; `git status --ignored` verifies exclusion.
 - **Status**: MITIGATED
 - **Residual Risk**: Evaluator must maintain local file secrecy for the generated `private/` directory.
@@ -240,9 +240,9 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Mitigation Strategy**: The domain model binds each `CUSTOMER` account to an explicit `user_id` foreign key (`AccountEntity.owner`). Service-layer methods strictly enforce ownership boundaries: both `AccountService` and `TransactionService` invoke `resolveCustomerAccount(accountId, userId)`, which asserts that the account exists, is a `CUSTOMER` account (rejecting `SYSTEM` accounts with `SystemAccountAccessException`), and that `account.getOwner().getId().equals(userId)` (rejecting cross-customer access with `AccountAccessDeniedException`). Transfer source accounts, deposits, withdrawals, and balance queries strictly resolve through this ownership guard. Account listing strictly filters by the authenticated user's ID (`accountRepository.findAllByOwnerIdOrderByCreatedAtDesc(userId)`).
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`accounts.owner_user_id` FK)
-  - `backend/ledgerline/src/main/java/com/ledgerline/domain/AccountEntity.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (`resolveCustomerAccount` ownership check)
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`resolveCustomerAccount` ownership check)
+  - `backend/ledgerline/src/main/java/com/vaultora/domain/AccountEntity.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountService.java` (`resolveCustomerAccount` ownership check)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (`resolveCustomerAccount` ownership check)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`
 - **Status**: MITIGATED
 - **Residual Risk**: Any newly added endpoints must continue to pass authenticated principal identity directly into service-layer ownership resolvers.
@@ -258,8 +258,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: System-wide administrative compromise, access to all customer accounts, audit trail evasion.
 - **Mitigation Strategy**: `RegisterRequest` DTO contains *only* `email` and `password`. The role is hardcoded to `UserRole.CUSTOMER` in `AuthController.register()`. It is impossible for external callers to supply a role parameter.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/RegisterRequest.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (line 46)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/RegisterRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java` (line 46)
 - **Verification**: `Phase1IntegrationTests.publicRegistrationCreatesCustomerRoleOnly()`
 - **Status**: MITIGATED
 - **Residual Risk**: Administrative user provisioning must be conducted via secure database migrations or dedicated internal provisioning tools.
@@ -278,8 +278,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   - Mutating HTTP methods (`POST`, `PUT`, `DELETE`) on `/api/v1/audit/**`: Denied.
   - Customer accounts (`CUSTOMER` role): Explicitly forbidden (HTTP 403) from accessing audit records.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditController.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditController.java`
 - **Verification**: `Phase1IntegrationTests.auditorRoleHasReadOnlyAccessAndCannotMutate()`
 - **Status**: MITIGATED
 - **Residual Risk**: Any new administrative endpoints created in Phase 2 must adhere to explicit HTTP method-level matching.
@@ -324,7 +324,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   2. Entity lifecycle callbacks `@PrePersist` and `@PreUpdate` in `AccountEntity.java` validating the invariant before executing database operations.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V6__account_ownership_immutability_and_privileges.sql`
-  - `backend/ledgerline/src/main/java/com/ledgerline/domain/AccountEntity.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/domain/AccountEntity.java`
 - **Verification**: `Phase1IntegrationTests.customerAccountRequiresOwnerAndSystemAccountRequiresNullOwner()`, `Phase1IntegrationTests.customerAccountCannotBeCreatedWithoutOwnerAtDatabaseLevel()`, `Phase1IntegrationTests.systemAccountCannotHaveOwnerAtDatabaseLevel()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. PostgreSQL check constraints reject any row violating ownership policy regardless of caller.
@@ -356,8 +356,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
      Any concurrent attempt to debit the account below zero causes the second transaction to abort with a check constraint violation.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V5__remediate_accounting_model_and_ledger_integrity.sql` (lines 43-47, 72-78)
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder` row locking, post-lock balance validation)
-  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java` (`findByIdForUpdate` with `@Lock(LockModeType.PESSIMISTIC_WRITE)`)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder` row locking, post-lock balance validation)
+  - `backend/ledgerline/src/main/java/com/vaultora/repository/AccountRepository.java` (`findByIdForUpdate` with `@Lock(LockModeType.PESSIMISTIC_WRITE)`)
 - **Verification**: `Phase1IntegrationTests.customerAccountCannotBecomeNegative()`, `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentWithdrawalsPreventOverdraft()`
 - **Status**: MITIGATED
 - **Residual Risk**: High concurrency on a single hot account serializes requests at the database level. Application backpressure and transaction timeouts ensure connections return cleanly.
@@ -379,8 +379,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   - For `DEBIT` normal accounts: Debit adds (`+`), Credit subtracts (`-`).
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V5__remediate_accounting_model_and_ledger_integrity.sql` (lines 8-28, 80-99)
-  - `backend/ledgerline/src/main/java/com/ledgerline/domain/NormalBalance.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/domain/AccountEntity.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/domain/NormalBalance.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/domain/AccountEntity.java`
 - **Verification**: `Phase1IntegrationTests.depositIncreasesBothCashAssetAndCustomerLiability()`, `Phase1IntegrationTests.withdrawalDecreasesBothCustomerLiabilityAndCashAsset()`, `Phase1IntegrationTests.transferDecreasesSenderAndIncreasesReceiver()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. Future account classifications (e.g., Equity, Revenue, Expense) map directly onto `CREDIT` or `DEBIT` normal balance rules.
@@ -450,7 +450,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Misleading API responses, race conditions if business rules evaluate stale in-memory state.
 - **Mitigation Strategy**: After trigger-affected ledger mutations, entities are explicitly refreshed from the database using `entityManager.refresh(managedEntity)` within the active transaction. Redundant repository custom wrappers have been removed in favor of standard JPA persistence context synchronization.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/repository/AccountRepository.java`
   - Integration tests utilizing `@PersistenceContext EntityManager`
 - **Verification**: `Phase1IntegrationTests.jpaRefreshesBalanceUpdatedByDatabaseTriggers()`
 - **Status**: MITIGATED
@@ -522,8 +522,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Full database exfiltration, credential theft, data destruction.
 - **Mitigation Strategy**: Zero raw concatenated SQL strings. All queries utilize Spring Data JPA parameterized repository methods (`findByEmail`, `findByAccountNumber`), JPA Criteria API, or strongly-typed named parameters.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/repository/UserRepository.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/repository/UserRepository.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/repository/AccountRepository.java`
 - **Verification**: `Phase1IntegrationTests.duplicateEmailRegistrationFailsGracefully()`
 - **Status**: MITIGATED
 - **Residual Risk**: None for existing Phase 1 queries. Code review guidelines require static analysis for any future native queries.
@@ -558,8 +558,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   2. Fail-safe runtime safety guard `TestDatabaseGuard` queries `SELECT current_database()` before any test execution. If the database name is not exactly `ledgerline_test_db`, it immediately throws `IllegalStateException`, halting the test runner before any schema or data modifications can occur.
 - **Implementation Evidence**:
   - `backend/ledgerline/src/test/resources/application-test.properties`
-  - `backend/ledgerline/src/test/java/com/ledgerline/TestDatabaseGuard.java`
-  - `backend/ledgerline/src/test/java/com/ledgerline/Phase1IntegrationTests.java` (line 69)
+  - `backend/ledgerline/src/test/java/com/vaultora/TestDatabaseGuard.java`
+  - `backend/ledgerline/src/test/java/com/vaultora/Phase1IntegrationTests.java` (line 69)
 - **Verification**: `TestDatabaseGuard` verified on every test execution.
 - **Status**: MITIGATED
 - **Residual Risk**: CI/CD pipelines must ensure test database credentials cannot access production database clusters.
@@ -604,7 +604,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Attacker maps backend architecture and dependencies.
 - **Mitigation Strategy**: Centralized exception handling via `ApiExceptionHandler` with `@RestControllerAdvice`. All business, validation, authentication, and rate limit exceptions are mapped to clean JSON responses (`{"error": "...", "message": "...", "timestamp": ...}`). Unhandled exceptions return generic messages without stack traces.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/ApiExceptionHandler.java`
 - **Verification**: `Phase1IntegrationTests.loginRateLimitingRejectsExcessiveAttempts()`, `Phase1IntegrationTests.passwordExceeding72Utf8BytesRejectedOnRegistration()`
 - **Status**: MITIGATED
 - **Residual Risk**: `server.error.include-stacktrace=never` must be verified in production profile.
@@ -620,9 +620,9 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Privilege escalation, balance manipulation.
 - **Mitigation Strategy**: Strict separation of DTOs and JPA Entities. Controllers only accept dedicated request records (`RegisterRequest`, `LoginRequest`) containing strictly validated fields. Entities are constructed explicitly in service/controller logic.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/RegisterRequest.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/LoginRequest.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/RegisterRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/LoginRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java`
 - **Verification**: `Phase1IntegrationTests.publicRegistrationCreatesCustomerRoleOnly()`
 - **Status**: MITIGATED
 - **Residual Risk**: None for existing endpoints. All future endpoints must use isolated DTO records.
@@ -638,7 +638,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Credential leakage to auditors or developers reading logs.
 - **Mitigation Strategy**: `AuditService` explicitly sanitizes metadata before persistence. Passwords, auth tokens, and session cookies are never passed to or stored in `audit_logs`. Only non-sensitive operational identifiers (`email`, `ip`, `role`, `status`) are captured.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditService.java` (lines 40-60)
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditService.java` (lines 40-60)
 - **Verification**: `Phase1IntegrationTests.authenticationAuditLogsPersistCorrectly()`
 - **Status**: MITIGATED
 - **Residual Risk**: Future audit events must follow strict sanitization checklists.
@@ -657,9 +657,9 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   2. Controller returns `Page<AuditLogResponse>`, preventing full table dumping and avoiding any reference to `UserEntity` or `passwordHash`.
   3. `AuditLogEntity.details` stores native JSONB objects (`Map<String, Object>`), ensuring proper structured metadata serialization without double-encoded JSON strings.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditLogResponse.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditController.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/audit/AuditLogEntity.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditLogResponse.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditController.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/audit/AuditLogEntity.java`
 - **Verification**: `Phase1IntegrationTests.auditLogsEndpointDoesNotExposePasswordHash()`, `Phase1IntegrationTests.auditLogDetailsPersistedAsJsonObject()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. The entity is never serialized directly by the controller.
@@ -680,8 +680,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   2. The account balance is strictly validated **after** acquiring the row lock; if `balance < amount`, `InsufficientFundsException` is thrown (HTTP 422 Unprocessable Content).
   3. PostgreSQL check constraint `accounts_customer_policy_chk` guarantees that customer accounts (`account_type = 'CUSTOMER'`) can never have a negative balance (`balance >= 0`). Any transaction that attempts to drive the balance below zero is immediately aborted by PostgreSQL.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder`, balance validation under lock)
-  - `backend/ledgerline/src/main/java/com/ledgerline/repository/AccountRepository.java` (`findByIdForUpdate`)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (`lockAccountsInDeterministicOrder`, balance validation under lock)
+  - `backend/ledgerline/src/main/java/com/vaultora/repository/AccountRepository.java` (`findByIdForUpdate`)
   - `backend/ledgerline/src/main/resources/db/migration/V5__remediate_accounting_model_and_ledger_integrity.sql`
 - **Verification**: `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentWithdrawalsPreventOverdraft()` (2 concurrent threads requesting ₹800 against ₹1,000 -> exactly 1 succeeds, 1 rejected with 422, final balance ₹200).
 - **Status**: MITIGATED
@@ -698,7 +698,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Database serialization failures, 500 internal server errors, connection pool exhaustion.
 - **Mitigation Strategy**: Deterministic natural UUID order locking in `TransactionService.lockAccountsInDeterministicOrder(...)`. All involved accounts are sorted in natural UUID order before issuing `SELECT ... FOR UPDATE`. Both threads always request lock A before lock B (or vice versa), eliminating circular wait conditions.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 385-392)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (lines 385-392)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentTransfersInOppositeDirectionsPreventDeadlock()` (Parallel opposing transfers across 10 threads complete with 0 deadlocks and exact balance preservation).
 - **Status**: MITIGATED
 - **Residual Risk**: None for bilateral transfers. Multi-account split transfers in future phases must adhere to the same sorted lock acquisition protocol.
@@ -719,7 +719,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
   4. Pre-execution check against `ledger_transactions` for existing completed transactions with the same `(user_id, idempotency_key)`. If completed with identical fingerprint, the original completed transaction is safely returned without duplicate ledger entries.
   5. Composite database unique index `ledger_transactions_idempotency_uidx` on `(initiated_by_user_id, idempotency_key)` providing secondary database-level uniqueness enforcement.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (`acquireIdempotencyAdvisoryLock`, `checkExistingIdempotentTransaction`)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (`acquireIdempotencyAdvisoryLock`, `checkExistingIdempotentTransaction`)
   - `backend/ledgerline/src/main/resources/db/migration/V1__initial_schema.sql` (`ledger_transactions_idempotency_uidx`)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameKeySamePayloadReturnsOriginalResult()`, `Phase2FinancialEngineIntegrationTests$ConcurrencyTests.concurrentDuplicateRequestsExecuteOnlyOnce()`
 - **Status**: MITIGATED
@@ -736,8 +736,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Ambiguous transaction records, silent payload corruption.
 - **Mitigation Strategy**: Strict SHA-256 fingerprint comparison. When an existing idempotency key is detected, the incoming fingerprint is compared with the stored `request_fingerprint`. If they do not match, `IdempotencyConflictException` is thrown, returning HTTP 409 Conflict with zero balance modification.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 398-403)
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java` (HTTP 409 mapping)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (lines 398-403)
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/ApiExceptionHandler.java` (HTTP 409 mapping)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$IdempotencyTests.sameKeyDifferentPayloadReturnsConflict()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. Reusing keys across different operations is strictly blocked.
@@ -753,8 +753,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Embezzlement from peer accounts, violation of financial privacy.
 - **Mitigation Strategy**: Server-side principal resolution and explicit ownership verification in `resolveCustomerAccount(accountId, userId)`. Every financial service checks `account.getOwner().getId().equals(authenticatedUser.getId())`. If ownership does not match, `AccountAccessDeniedException` is thrown, returning HTTP 403 Forbidden.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (lines 90-100)
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 430-438)
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountService.java` (lines 90-100)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (lines 430-438)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessAnotherCustomerAccount()`, `Phase2FinancialEngineIntegrationTests$WithdrawalTests.withdrawalFromAnotherCustomerAccountIsRejected()`, `Phase2FinancialEngineIntegrationTests$DepositTests.depositToAnotherCustomerAccountIsRejected()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. All account resolutions are validated against the authenticated Spring Security principal.
@@ -770,8 +770,8 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Distorted bank asset balance sheet, unauthorized view of bank reserves.
 - **Mitigation Strategy**: Explicit `AccountType.SYSTEM` checks in both `AccountService` and `TransactionService`. Any attempt by a customer to access an account with `account_type = 'SYSTEM'` or initiate a transfer with a destination system account immediately throws `SystemAccountAccessException`, returning HTTP 403 Forbidden. System accounts are strictly operational counterparts invoked server-side.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/account/AccountService.java` (lines 93-95)
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 261-263, 428-430)
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountService.java` (lines 93-95)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (lines 261-263, 428-430)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$AccountManagementTests.customerCannotAccessSystemAccount()`, `Phase2FinancialEngineIntegrationTests$TransferTests.transferToSystemAccountIsRejected()`
 - **Status**: MITIGATED
 - **Residual Risk**: None. System accounts are unreachable via customer-facing APIs.
@@ -787,7 +787,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Audit log pollution, wasted database storage.
 - **Mitigation Strategy**: Service-level assertion `sourceAccount.getId().equals(destinationAccount.getId())` throwing `SelfTransferException`, returning HTTP 400 Bad Request.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/transaction/TransactionService.java` (lines 265-267)
+  - `backend/ledgerline/src/main/java/com/vaultora/transaction/TransactionService.java` (lines 265-267)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$TransferTests.selfTransferIsRejected()`
 - **Status**: MITIGATED
 - **Residual Risk**: None.
@@ -803,7 +803,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Potential Impact**: Regulatory compliance violation, unauthorized money movement.
 - **Mitigation Strategy**: Explicit method-level URL protection in `SecurityConfig`. `POST /api/v1/transactions/**` and `POST /api/v1/accounts/**` are strictly restricted to `hasAnyRole('CUSTOMER', 'ADMIN')`. Any request by an `AUDITOR` is rejected with HTTP 403 Forbidden.
 - **Implementation Evidence**:
-  - `backend/ledgerline/src/main/java/com/ledgerline/security/SecurityConfig.java` (lines 38-42)
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java` (lines 38-42)
 - **Verification**: `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests.auditorCannotInitiateMoneyMovement()`
 - **Status**: MITIGATED
 - **Residual Risk**: None.
@@ -1017,7 +1017,7 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 
 ## 4. Architectural Defense-in-Depth Summary
 
-LedgerLine adheres to the principle that **no single software layer is solely responsible for system security or financial integrity**. A defect, misconfiguration, or vulnerability in any one layer is intercepted and nullified by subsequent layers.
+Vaultora adheres to the principle that **no single software layer is solely responsible for system security or financial integrity**. A defect, misconfiguration, or vulnerability in any one layer is intercepted and nullified by subsequent layers.
 
 ```
 Request Flow & Defense Layers:
