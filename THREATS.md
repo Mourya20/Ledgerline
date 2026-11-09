@@ -331,6 +331,33 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 
 ---
 
+
+#### SEC-AUTHZ-006: Account Deletion and Non-Zero Balance Stranded Fund Destruction
+- **Category**: Authorization / Lifecycle Integrity
+- **Severity**: High (Loss of customer visibility over active funds; referential integrity violation)
+- **Attack Scenario**: A malicious actor or user attempts to delete an account holding positive balance, stranding financial liabilities, or an unauthenticated/cross-customer actor attempts to close another user's account. Alternatively, an application component attempts to execute physical SQL `DELETE` on `accounts`, corrupting foreign-key referential integrity in `ledger_entries`.
+- **Mitigation Strategy**:
+  1. Service-level ownership assertion: `AccountService.closeAccount` verifies that the caller owns the account or holds `ADMIN` role; cross-customer attempts throw `AccountAccessDeniedException` (HTTP 403 Forbidden).
+  2. Financial balance verification: strictly asserts `account.getBalance().compareTo(BigDecimal.ZERO) == 0`. Any non-zero balance is rejected with `IllegalArgumentException` (HTTP 400 Bad Request: "Account balance must be 0.00 to close or delete an account").
+  3. Database-level immutability: Flyway migration V8 revokes SQL `DELETE` on `accounts` from the runtime database user (`REVOKE DELETE ON accounts FROM ledgerline_runtime`). Account deletion is modeled as a compliant soft-close (`AccountStatus.CLOSED`), completely preserving double-entry accounting records, journal entries, and referential integrity.
+  4. Immutable Audit Trail: Every account closure records an immutable audit event `ACCOUNT_CLOSED` capturing the actor, account number, previous status, and final zero balance.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountService.java` (`closeAccount`)
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountController.java` (`closeAccount` with `DELETE /api/v1/accounts/{accountId}`)
+- **Verification**: `AccountManagementIntegrationTests.customerCanCloseOwnZeroBalanceAccount()`, `AccountManagementIntegrationTests.customerCannotCloseAccountWithPositiveBalance()`, `AccountManagementIntegrationTests.customerCannotCloseAnotherCustomersAccount()`
+
+#### SEC-PRIV-003: Administrative Customer Account Inspection Privilege Escalation
+- **Category**: Authorization / Data Privacy
+- **Severity**: High (Unauthorized disclosure of customer banking portfolios)
+- **Attack Scenario**: A non-administrative user (Customer or Auditor) probes `GET /api/v1/admin/users/{userId}/accounts` to discover accounts, balances, and numbers owned by other customers.
+- **Mitigation Strategy**:
+  1. Spring Security URL matcher: `.requestMatchers("/api/v1/admin/**").hasRole("ADMIN")` strictly enforces administrative role boundary. Non-admin users are rejected with HTTP 403 Forbidden.
+  2. Controller verification: `AdminController.getUserAccounts` calls `verifyAdmin(authentication)` validating the authenticated user identity and database role.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/admin/AdminController.java` (`getUserAccounts`)
+- **Verification**: `AccountManagementIntegrationTests.adminCanViewAccountsOfSpecificCustomer()`, `AccountManagementIntegrationTests.customerCannotAccessAdminUserAccountsEndpoint()`
+
 ### Category C: Financial & Ledger Integrity (Highest Priority)
 
 #### SEC-FIN-001: Race Conditions & Concurrent Double-Spending

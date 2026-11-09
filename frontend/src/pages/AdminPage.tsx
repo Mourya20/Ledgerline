@@ -81,6 +81,16 @@ export const AdminPage: React.FC = () => {
   const [depositSuccess, setDepositSuccess] = useState<TransactionResponse | null>(null);
   const [depositError, setDepositError] = useState<string | null>(null);
 
+  // Customer-specific account filtering in Accounts Directory
+  const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>('');
+
+  // Customer Account Inspection Modal state
+  const [inspectedCustomer, setInspectedCustomer] = useState<UserSummaryResponse | null>(null);
+  const [inspectedCustomerAccounts, setInspectedCustomerAccounts] = useState<AccountResponse[]>([]);
+  const [inspectedCustomerLoading, setInspectedCustomerLoading] = useState<boolean>(false);
+  const [inspectedCustomerError, setInspectedCustomerError] = useState<string | null>(null);
+  const [isCreatingForInspectedCustomer, setIsCreatingForInspectedCustomer] = useState<boolean>(false);
+
   // Demonstration vs Pre-Existing / Dev scopes
   const [accountScope, setAccountScope] = useState<'all' | 'demo' | 'dev'>('all');
   const [userScope, setUserScope] = useState<'all' | 'demo' | 'dev'>('all');
@@ -272,6 +282,65 @@ export const AdminPage: React.FC = () => {
       setDepositing(false);
     }
   };
+
+  // Inspect specific customer accounts modal handlers
+  const handleInspectCustomer = async (targetUser: UserSummaryResponse) => {
+    setInspectedCustomer(targetUser);
+    setInspectedCustomerLoading(true);
+    setInspectedCustomerError(null);
+    try {
+      const data = await adminApi.getUserAccounts(targetUser.id);
+      setInspectedCustomerAccounts(data);
+    } catch (err: unknown) {
+      setInspectedCustomerError(err instanceof Error ? err.message : 'Failed to retrieve customer accounts.');
+    } finally {
+      setInspectedCustomerLoading(false);
+    }
+  };
+
+  const handleModalUpdateAccountStatus = async (accountId: string, newStatus: AccountStatus) => {
+    try {
+      setStatusUpdatingAccountId(accountId);
+      await adminApi.updateAccountStatus(accountId, newStatus);
+      await fetchAccounts();
+      if (inspectedCustomer) {
+        const updated = await adminApi.getUserAccounts(inspectedCustomer.id);
+        setInspectedCustomerAccounts(updated);
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to update account status');
+    } finally {
+      setStatusUpdatingAccountId(null);
+    }
+  };
+
+  const handleModalCreateAccount = async () => {
+    if (!inspectedCustomer) return;
+    try {
+      setIsCreatingForInspectedCustomer(true);
+      await accountsApi.createAccount({
+        currency: 'INR',
+        customerEmail: inspectedCustomer.email,
+      });
+      await fetchAccounts();
+      await fetchStats();
+      await fetchUsers();
+      const updated = await adminApi.getUserAccounts(inspectedCustomer.id);
+      setInspectedCustomerAccounts(updated);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to create account for customer');
+    } finally {
+      setIsCreatingForInspectedCustomer(false);
+    }
+  };
+
+  const uniqueCustomerEmails = Array.from(
+    new Set(
+      accounts
+        .map((a) => a.ownerEmail)
+        .filter((e): e is string => !!e)
+    )
+  ).sort();
 
   const getStatusColor = (status?: string) => {
     switch (status?.toUpperCase()) {
@@ -694,6 +763,20 @@ export const AdminPage: React.FC = () => {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <select
+                    value={selectedCustomerFilter}
+                    onChange={(e) => setSelectedCustomerFilter(e.target.value)}
+                    aria-label="Filter accounts by specific customer"
+                    className="input-field"
+                    style={{ fontSize: '13px', padding: '6px 10px', width: 'auto' }}
+                  >
+                    <option value="">All Customers (Bank-Wide)</option>
+                    {uniqueCustomerEmails.map((email) => (
+                      <option key={email} value={email}>
+                        {email}
+                      </option>
+                    ))}
+                  </select>
+                  <select
                     value={accountScope}
                     onChange={(e) => setAccountScope(e.target.value as 'all' | 'demo' | 'dev')}
                     aria-label="Filter accounts scope"
@@ -725,6 +808,20 @@ export const AdminPage: React.FC = () => {
                 </div>
               </div>
 
+              {selectedCustomerFilter && (
+                <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: '#0369A1', backgroundColor: '#E0F2FE', padding: '4px 10px', borderRadius: '4px', fontWeight: 500 }}>
+                    Filtered by customer: <strong>{selectedCustomerFilter}</strong> ({filteredAccounts.length} accounts found)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCustomerFilter('')}
+                    style={{ fontSize: '11px', color: '#EF4444', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Clear Customer Filter
+                  </button>
+                </div>
+              )}
               {accountsLoading && accounts.length === 0 ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: '#6B7280', fontSize: '14px' }}>Loading accounts...</div>
               ) : accountsError ? (
@@ -947,7 +1044,22 @@ export const AdminPage: React.FC = () => {
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', color: '#374151' }}>
-                            {u.accountCount} {u.accountCount === 1 ? 'account' : 'accounts'}
+                            {u.role === 'CUSTOMER' ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontWeight: 600 }}>{u.accountCount}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleInspectCustomer(u)}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title={`Inspect accounts owned by ${u.email}`}
+                                >
+                                  View Accounts &rarr;
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ color: '#9CA3AF' }}>—</span>
+                            )}
                           </td>
                           <td style={{ padding: '10px 14px' }}>
                             <span
@@ -1197,6 +1309,254 @@ export const AdminPage: React.FC = () => {
                 {depositing ? 'Processing Deposit...' : 'Disburse / Deposit Funds'}
               </button>
             </form>
+          </div>
+        )}
+        {/* CUSTOMER ACCOUNTS INSPECTOR MODAL */}
+        {inspectedCustomer && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            zIndex: 1000
+          }}>
+            <div className="card" style={{ width: '100%', maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto', padding: '28px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', borderBottom: '1px solid #E5E7EB', paddingBottom: '16px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="badge badge-purple" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                      Customer Accounts Portfolio
+                    </span>
+                    <span className={inspectedCustomer.status === 'ACTIVE' ? 'badge badge-green' : 'badge badge-red'} style={{ fontSize: '11px' }}>
+                      {inspectedCustomer.status}
+                    </span>
+                  </div>
+                  <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#111827', margin: '6px 0 2px 0' }}>
+                    {inspectedCustomer.email}
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#6B7280', fontFamily: 'monospace' }}>
+                    User ID: {inspectedCustomer.id} &bull; Registered {formatDate(inspectedCustomer.createdAt, false)}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setInspectedCustomer(null)}
+                  style={{ fontSize: '16px', padding: '4px 10px', lineHeight: 1 }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                marginBottom: '20px',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div>
+                  <span style={{ fontSize: '12px', color: '#64748B' }}>Total Combined Balance: </span>
+                  <strong style={{ fontSize: '16px', color: '#0D6E64' }}>
+                    {formatCurrency(
+                      inspectedCustomerAccounts.reduce((sum, a) => sum + Number(a.balance || 0), 0)
+                    )}
+                  </strong>
+                  <span style={{ fontSize: '12px', color: '#64748B', marginLeft: '12px' }}>
+                    ({inspectedCustomerAccounts.length} {inspectedCustomerAccounts.length === 1 ? 'account' : 'accounts'})
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                    onClick={handleModalCreateAccount}
+                    disabled={isCreatingForInspectedCustomer}
+                  >
+                    {isCreatingForInspectedCustomer ? 'Opening...' : '+ Open New Account'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                    onClick={() => {
+                      const email = inspectedCustomer.email;
+                      setInspectedCustomer(null);
+                      setSelectedCustomerFilter(email);
+                      setActiveTab('accounts');
+                    }}
+                  >
+                    View in Directory &rarr;
+                  </button>
+                </div>
+              </div>
+
+              {inspectedCustomerLoading ? (
+                <div style={{ padding: '32px', textAlign: 'center', color: '#6B7280' }}>Loading accounts...</div>
+              ) : inspectedCustomerError ? (
+                <div style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', padding: '12px', color: '#991B1B', fontSize: '13px' }}>
+                  {inspectedCustomerError}
+                </div>
+              ) : inspectedCustomerAccounts.length === 0 ? (
+                <div style={{ padding: '32px', textAlign: 'center', color: '#6B7280' }}>
+                  This customer does not currently have any accounts.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #E5E7EB', textAlign: 'left', color: '#4B5563', backgroundColor: '#F9FAFB' }}>
+                        <th style={{ padding: '10px 12px', fontWeight: 600 }}>Account Number</th>
+                        <th style={{ padding: '10px 12px', fontWeight: 600 }}>Balance</th>
+                        <th style={{ padding: '10px 12px', fontWeight: 600 }}>Status</th>
+                        <th style={{ padding: '10px 12px', fontWeight: 600 }}>Opened Date</th>
+                        <th style={{ padding: '10px 12px', fontWeight: 600 }}>Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inspectedCustomerAccounts.map((acc) => (
+                        <tr key={acc.id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                          <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 600, color: '#111827' }}>
+                            {acc.accountNumber}
+                          </td>
+                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#111827' }}>
+                            {formatCurrency(acc.balance, acc.currency)}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span
+                              className={
+                                acc.status === 'ACTIVE'
+                                  ? 'badge badge-green'
+                                  : acc.status === 'FROZEN'
+                                  ? 'badge badge-amber'
+                                  : 'badge badge-red'
+                              }
+                              style={{ fontSize: '11px' }}
+                            >
+                              {acc.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#6B7280', fontSize: '12px' }}>
+                            {formatDate(acc.createdAt, true)}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {acc.status === 'ACTIVE' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleModalUpdateAccountStatus(acc.id, 'FROZEN')}
+                                  disabled={statusUpdatingAccountId === acc.id}
+                                  style={{
+                                    padding: '2px 8px',
+                                    fontSize: '11px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #FCD34D',
+                                    backgroundColor: '#FEF3C7',
+                                    color: '#92400E',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Freeze
+                                </button>
+                              )}
+                              {acc.status === 'FROZEN' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleModalUpdateAccountStatus(acc.id, 'ACTIVE')}
+                                  disabled={statusUpdatingAccountId === acc.id}
+                                  style={{
+                                    padding: '2px 8px',
+                                    fontSize: '11px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #A7F3D0',
+                                    backgroundColor: '#ECFDF5',
+                                    color: '#065F46',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Unfreeze
+                                </button>
+                              )}
+                              {acc.status !== 'CLOSED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to close account ${acc.accountNumber}?`)) {
+                                      handleModalUpdateAccountStatus(acc.id, 'CLOSED');
+                                    }
+                                  }}
+                                  disabled={statusUpdatingAccountId === acc.id}
+                                  style={{
+                                    padding: '2px 8px',
+                                    fontSize: '11px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #FECACA',
+                                    backgroundColor: '#FEF2F2',
+                                    color: '#991B1B',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Close
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ padding: '2px 8px', fontSize: '11px' }}
+                                onClick={() => {
+                                  setInspectedCustomer(null);
+                                  setFilterAccountId(acc.id);
+                                  setActiveTab('transactions');
+                                  fetchTransactions(acc.id);
+                                }}
+                              >
+                                Tx History
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ padding: '2px 8px', fontSize: '11px' }}
+                                onClick={() => {
+                                  setInspectedCustomer(null);
+                                  setDepositAccountId(acc.id);
+                                  setActiveTab('deposit');
+                                }}
+                              >
+                                Credit Funds
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setInspectedCustomer(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -97,6 +98,15 @@ public class AccountController {
             return ResponseEntity.ok(accountService.getAccountBalanceForAdmin(accountId));
         }
         return ResponseEntity.ok(accountService.getAccountBalance(accountId, actor.getId()));
+    }
+
+    @DeleteMapping("/{accountId}")
+    public ResponseEntity<AccountResponse> closeAccount(
+            Authentication authentication,
+            @PathVariable UUID accountId) {
+        UserEntity actor = resolveUser(authentication);
+        AccountResponse response = accountService.closeAccount(actor, accountId);
+        return ResponseEntity.ok(response);
     }
 
     private UserEntity resolveUser(Authentication authentication) {

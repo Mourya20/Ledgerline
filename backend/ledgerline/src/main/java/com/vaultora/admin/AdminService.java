@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.vaultora.account.dto.AccountResponse;
 import com.vaultora.admin.dto.AdminStatsResponse;
 import com.vaultora.admin.dto.UserSummaryResponse;
 import com.vaultora.audit.AuditService;
@@ -54,6 +55,16 @@ public class AdminService {
                     accounts
             );
         }).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AccountResponse> getUserAccounts(UUID userId) {
+        userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+        return accountRepository.findAllByOwnerId(userId)
+                .stream()
+                .map(AccountResponse::fromEntity)
+                .toList();
     }
 
     @Transactional

@@ -1,6 +1,8 @@
 package com.vaultora.account;
 
+import java.math.BigDecimal;
 import java.security.SecureRandom;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -13,8 +15,10 @@ import com.vaultora.account.dto.AccountResponse;
 import com.vaultora.account.dto.CreateAccountRequest;
 import com.vaultora.audit.AuditService;
 import com.vaultora.domain.AccountEntity;
+import com.vaultora.domain.AccountStatus;
 import com.vaultora.domain.AccountType;
 import com.vaultora.domain.UserEntity;
+import com.vaultora.domain.UserRole;
 import com.vaultora.exception.AccountAccessDeniedException;
 import com.vaultora.exception.AccountNotFoundException;
 import com.vaultora.exception.CurrencyMismatchException;
@@ -51,7 +55,7 @@ public class AccountService {
         AccountEntity account = new AccountEntity(accountNumber, targetUser, AccountType.CUSTOMER, SUPPORTED_CURRENCY);
         AccountEntity saved = accountRepository.save(account);
 
-        Map<String, Object> details = new java.util.HashMap<>();
+        Map<String, Object> details = new HashMap<>();
         details.put("accountNumber", saved.getAccountNumber());
         details.put("currency", saved.getCurrency());
         details.put("accountType", saved.getAccountType().name());
@@ -85,6 +89,56 @@ public class AccountService {
                 .stream()
                 .map(AccountResponse::fromEntity)
                 .toList();
+    }
+
+    @Transactional
+    public AccountResponse closeAccount(UserEntity actor, UUID accountId) {
+        AccountEntity account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
+
+        if (account.getAccountType() == AccountType.SYSTEM) {
+            throw new SystemAccountAccessException("System accounts cannot be closed or deleted");
+        }
+
+        if (actor.getRole() != UserRole.ADMIN) {
+            if (account.getOwner() == null || !account.getOwner().getId().equals(actor.getId())) {
+                throw new AccountAccessDeniedException("Access denied to account: " + accountId);
+            }
+        }
+
+        if (account.getStatus() == AccountStatus.CLOSED) {
+            throw new IllegalArgumentException("Account is already closed");
+        }
+
+        if (account.getBalance().compareTo(BigDecimal.ZERO) != 0) {
+            throw new IllegalArgumentException("Account balance must be 0.00 to close or delete an account. Current balance: "
+                    + account.getBalance() + " " + account.getCurrency() + ". Please transfer or withdraw all funds first.");
+        }
+
+        AccountStatus previousStatus = account.getStatus();
+        account.setStatus(AccountStatus.CLOSED);
+        AccountEntity saved = accountRepository.save(account);
+
+        Map<String, Object> details = new HashMap<>();
+        details.put("accountNumber", saved.getAccountNumber());
+        details.put("currency", saved.getCurrency());
+        details.put("previousStatus", previousStatus.name());
+        details.put("newStatus", AccountStatus.CLOSED.name());
+        details.put("closedBy", actor.getEmail());
+        details.put("actorRole", actor.getRole().name());
+        if (saved.getOwner() != null) {
+            details.put("ownerEmail", saved.getOwner().getEmail());
+        }
+
+        auditService.recordEvent(
+                actor,
+                "ACCOUNT_CLOSED",
+                "ACCOUNT",
+                saved.getId(),
+                details
+        );
+
+        return AccountResponse.fromEntity(saved);
     }
 
     @Transactional(readOnly = true)

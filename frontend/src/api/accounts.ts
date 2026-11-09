@@ -27,4 +27,10 @@ export const accountsApi = {
       body: JSON.stringify(data),
     });
   },
+
+  closeAccount: async (accountId: string): Promise<AccountResponse> => {
+    return apiClient<AccountResponse>(`/api/v1/accounts/${accountId}`, {
+      method: 'DELETE',
+    });
+  },
 };

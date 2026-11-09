@@ -104,6 +104,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/transactions/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts/**").hasAnyRole("CUSTOMER", "ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/accounts/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, exception) -> response.sendError(

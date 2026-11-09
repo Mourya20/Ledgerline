@@ -766,3 +766,32 @@ Strict constraints were enforced:
   - Grep verification across all active application sources confirmed zero stale active references to `LedgerLine`.
   - Working tree preserved clean and unstaged on `feature/phase-3-frontend`.
 
+
+
+---
+
+## 17. Phase 4 — Customer Account Lifecycle Management & Administrator Customer Portfolio Oversight
+
+### Requirements Summary
+1. **Customer Account Management & Closure/Deletion**:
+   - Provide customer authority to manage and close/delete their own bank accounts.
+   - Enforce financial ledger integrity: an account can only be closed if its balance is strictly `0.00 INR`. Accounts with non-zero balances reject closure with HTTP 400 Bad Request.
+   - Enforce ownership isolation: customers cannot close accounts owned by other customers.
+   - Enforce role-based access: auditors cannot close accounts (HTTP 403 Forbidden).
+   - Enforce regulatory database immutability: runtime role `ledgerline_runtime` has `REVOKE DELETE ON accounts`; account deletion is executed as an audited soft-closure (`status = CLOSED`), preserving ledger entries and foreign key constraints.
+   - Log immutable audit event `ACCOUNT_CLOSED` with actor, account number, and details.
+   - Frontend UI: Account cards feature dedicated "Close" action with modal confirmation, warning banner, zero-balance check, and filter tabs (All, Active, Closed).
+
+2. **Administrator Customer-Specific Portfolio Oversight**:
+   - Provide administrators with direct visibility into accounts owned by specific customers, not just aggregate counts.
+   - Backend endpoint: `GET /api/v1/admin/users/{userId}/accounts` (restricted strictly to `ADMIN`).
+   - Frontend UI:
+     - **Users & Roles Directory**: Each customer row features an interactive "View Accounts →" action opening a comprehensive **Customer Account Portfolio Modal** displaying all accounts owned by that specific user, live balances, status badges, quick-actions to freeze/unfreeze/close, view transaction history, and credit funds.
+     - **Accounts Directory**: Added a "Filter by Customer" dropdown enabling single-click filtering of all bank accounts by specific customer email.
+     - Direct "+ Open New Account for this Customer" modal button for administrative account creation.
+
+### Verification Results
+- Backend integration tests: `com.vaultora.account.AccountManagementIntegrationTests` (7/7 tests passed).
+- Entire backend test suite: 118 tests passed, 0 failures, 0 errors.
+- Frontend test suite: 32 tests passed, 0 failures.
+- Frontend production bundle build: `tsc -b && vite build` built in 496ms with 0 errors.

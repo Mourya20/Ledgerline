@@ -50,6 +50,14 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getAllUsers());
     }
 
+    @GetMapping("/users/{userId}/accounts")
+    public ResponseEntity<List<AccountResponse>> getUserAccounts(
+            Authentication authentication,
+            @PathVariable UUID userId) {
+        verifyAdmin(authentication);
+        return ResponseEntity.ok(adminService.getUserAccounts(userId));
+    }
+
     @PatchMapping("/users/{userId}/status")
     public ResponseEntity<UserSummaryResponse> updateUserStatus(
             Authentication authentication,

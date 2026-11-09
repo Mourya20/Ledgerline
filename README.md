@@ -220,6 +220,8 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
 | `/api/v1/accounts` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/accounts/{id}` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/accounts/{id}/balance` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
+| `/api/v1/accounts/{id}` | `DELETE` | Denied (401) | **Allowed (Own Zero-Bal)** | **Denied (403)** | Allowed |
+| `/api/v1/admin/users/{id}/accounts` | `GET` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
 | `/api/v1/transactions/deposit` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
 | `/api/v1/transactions/withdraw` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
 | `/api/v1/transactions/transfer` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |

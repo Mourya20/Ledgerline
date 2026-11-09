@@ -20,6 +20,12 @@ export const adminApi = {
     });
   },
 
+  getUserAccounts: async (userId: string): Promise<AccountResponse[]> => {
+    return apiClient<AccountResponse[]>(`/api/v1/admin/users/${userId}/accounts`, {
+      method: 'GET',
+    });
+  },
+
   updateUserStatus: async (userId: string, status: UserStatus): Promise<UserSummaryResponse> => {
     return apiClient<UserSummaryResponse>(`/api/v1/admin/users/${userId}/status`, {
       method: 'PATCH',
