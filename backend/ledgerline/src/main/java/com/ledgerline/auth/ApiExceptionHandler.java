@@ -22,6 +22,7 @@ import com.ledgerline.exception.InvalidAmountException;
 import com.ledgerline.exception.MissingIdempotencyKeyException;
 import com.ledgerline.exception.SelfTransferException;
 import com.ledgerline.exception.SystemAccountAccessException;
+import com.ledgerline.exception.TransactionNotFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -50,8 +51,8 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(Map.of("error", "Request validation failed"));
     }
 
-    @ExceptionHandler(AccountNotFoundException.class)
-    public ResponseEntity<Map<String, String>> accountNotFound(AccountNotFoundException ex) {
+    @ExceptionHandler({ AccountNotFoundException.class, TransactionNotFoundException.class })
+    public ResponseEntity<Map<String, String>> resourceNotFound(RuntimeException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
     }
 

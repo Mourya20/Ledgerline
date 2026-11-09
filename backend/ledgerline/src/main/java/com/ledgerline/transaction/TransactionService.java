@@ -42,6 +42,7 @@ import com.ledgerline.exception.InvalidAmountException;
 import com.ledgerline.exception.MissingIdempotencyKeyException;
 import com.ledgerline.exception.SelfTransferException;
 import com.ledgerline.exception.SystemAccountAccessException;
+import com.ledgerline.exception.TransactionNotFoundException;
 import com.ledgerline.repository.AccountRepository;
 import com.ledgerline.repository.LedgerEntryRepository;
 import com.ledgerline.repository.LedgerTransactionRepository;
@@ -412,7 +413,7 @@ public class TransactionService {
     @Transactional(readOnly = true)
     public TransactionResponse getTransactionById(UUID transactionId, UUID userId) {
         LedgerTransactionEntity tx = ledgerTransactionRepository.findById(transactionId)
-                .orElseThrow(() -> new AccountNotFoundException("Transaction not found: " + transactionId));
+                .orElseThrow(() -> new TransactionNotFoundException("Transaction not found: " + transactionId));
 
         boolean userInvolved = (tx.getInitiatedByUser() != null && tx.getInitiatedByUser().getId().equals(userId))
                 || ledgerTransactionRepository.isUserInvolvedInTransaction(transactionId, userId);

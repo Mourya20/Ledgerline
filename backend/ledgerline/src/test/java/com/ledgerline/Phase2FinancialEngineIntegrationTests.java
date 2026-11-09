@@ -19,6 +19,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -82,10 +83,10 @@ public class Phase2FinancialEngineIntegrationTests {
     @Value("${spring.datasource.url}")
     private String testDbUrl;
 
-    @Value("${ledgerline.runtime.username:ledgerline_runtime}")
+    @Value("${ledgerline.runtime.username}")
     private String runtimeUser;
 
-    @Value("${ledgerline.runtime.password:ledgerline_runtime_secret}")
+    @Value("${ledgerline.runtime.password}")
     private String runtimePassword;
 
     @BeforeEach
@@ -1593,6 +1594,97 @@ public class Phase2FinancialEngineIntegrationTests {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"accountId\":\"" + accId + "\",\"amount\":50.00,\"currency\":\"USD\"}"))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: runtime role attributes enforce non-superuser, noinherit, and least privilege")
+        void runtimeRoleCatalogAttributesAssertLeastPrivilege() {
+            Map<String, Object> roleAttrs = jdbcTemplate.queryForMap(
+                    "SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin " +
+                    "FROM pg_roles WHERE rolname = ?", runtimeUser);
+            assertEquals(false, roleAttrs.get("rolsuper"), "Runtime role must not be superuser");
+            assertEquals(false, roleAttrs.get("rolinherit"), "Runtime role must have NOINHERIT");
+            assertEquals(false, roleAttrs.get("rolcreaterole"), "Runtime role must not be allowed to create roles");
+            assertEquals(false, roleAttrs.get("rolcreatedb"), "Runtime role must not be allowed to create databases");
+            assertEquals(true, roleAttrs.get("rolcanlogin"), "Runtime role must be allowed to login");
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: runtime role inherits no role memberships or administrative options")
+        void runtimeRoleHasZeroRoleMemberships() {
+            Integer membershipCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM pg_auth_members a " +
+                    "JOIN pg_roles r ON a.member = r.oid WHERE r.rolname = ?",
+                    Integer.class, runtimeUser);
+            assertNotNull(membershipCount);
+            assertEquals(0, membershipCount, "Runtime role must not be a member of any privileged role");
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: schema tables are owned by migration administrator and not runtime role")
+        void databaseTablesAreOwnedByMigrationRoleAndNotRuntime() {
+            List<String> nonAppOwnedTables = jdbcTemplate.queryForList(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner <> 'ledgerline_app'",
+                    String.class);
+            assertTrue(nonAppOwnedTables.isEmpty(), "All public schema tables must be owned by ledgerline_app");
+
+            List<String> runtimeOwnedTables = jdbcTemplate.queryForList(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tableowner = ?",
+                    String.class, runtimeUser);
+            assertTrue(runtimeOwnedTables.isEmpty(), "Runtime role must not own any tables");
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: runtime table privileges are strictly limited to SELECT and INSERT")
+        void runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert() {
+            List<String> prohibitedTablePrivileges = jdbcTemplate.queryForList(
+                    "SELECT privilege_type FROM information_schema.role_table_grants " +
+                    "WHERE grantee = ? AND privilege_type IN ('DELETE', 'TRUNCATE', 'UPDATE')",
+                    String.class, runtimeUser);
+            assertTrue(prohibitedTablePrivileges.isEmpty(),
+                    "Runtime role must have zero table-level DELETE, TRUNCATE, or UPDATE grants");
+
+            List<String> grantedPrivileges = jdbcTemplate.queryForList(
+                    "SELECT DISTINCT privilege_type FROM information_schema.role_table_grants " +
+                    "WHERE grantee = ? ORDER BY privilege_type",
+                    String.class, runtimeUser);
+            assertEquals(List.of("INSERT", "SELECT"), grantedPrivileges,
+                    "Runtime role must only have INSERT and SELECT table-level grants");
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: column UPDATE grants strictly limited to status and timestamps")
+        void runtimeRoleColumnGrantsLimitUpdateStrictly() {
+            List<String> updateColumns = jdbcTemplate.queryForList(
+                    "SELECT table_name || '.' || column_name AS col " +
+                    "FROM information_schema.role_column_grants " +
+                    "WHERE grantee = ? AND privilege_type = 'UPDATE' " +
+                    "ORDER BY col",
+                    String.class, runtimeUser);
+            List<String> expectedAllowedUpdates = List.of(
+                    "accounts.status",
+                    "accounts.updated_at",
+                    "ledger_transactions.completed_at",
+                    "ledger_transactions.status",
+                    "users.status",
+                    "users.updated_at"
+            );
+            assertEquals(expectedAllowedUpdates, updateColumns,
+                    "Runtime role must only have column-level UPDATE on non-sensitive status and timestamp columns");
+        }
+
+        @Test
+        @DisplayName("PostgreSQL Catalog: schema public does not grant CREATE to runtime role or PUBLIC")
+        void schemaPublicHasNoCreatePrivilegeForRuntimeOrPublic() {
+            Boolean publicHasCreate = jdbcTemplate.queryForObject(
+                    "SELECT has_schema_privilege('public', 'public', 'CREATE')",
+                    Boolean.class);
+            assertEquals(false, publicHasCreate, "PUBLIC must not have CREATE privilege on schema public");
+
+            Boolean runtimeHasCreate = jdbcTemplate.queryForObject(
+                    "SELECT has_schema_privilege(?, 'public', 'CREATE')",
+                    Boolean.class, runtimeUser);
+            assertEquals(false, runtimeHasCreate, "Runtime role must not have CREATE privilege on schema public");
         }
     }
 
