@@ -37,28 +37,46 @@ public class AccountService {
 
     @Transactional
     public AccountResponse createAccount(UserEntity user, CreateAccountRequest request) {
+        return createAccount(user, user, request);
+    }
+
+    @Transactional
+    public AccountResponse createAccount(UserEntity actor, UserEntity targetUser, CreateAccountRequest request) {
         String currency = request.currency();
         if (!SUPPORTED_CURRENCY.equalsIgnoreCase(currency)) {
             throw new CurrencyMismatchException("Only INR currency is currently supported");
         }
 
         String accountNumber = generateUniqueAccountNumber();
-        AccountEntity account = new AccountEntity(accountNumber, user, AccountType.CUSTOMER, SUPPORTED_CURRENCY);
+        AccountEntity account = new AccountEntity(accountNumber, targetUser, AccountType.CUSTOMER, SUPPORTED_CURRENCY);
         AccountEntity saved = accountRepository.save(account);
 
+        Map<String, Object> details = new java.util.HashMap<>();
+        details.put("accountNumber", saved.getAccountNumber());
+        details.put("currency", saved.getCurrency());
+        details.put("accountType", saved.getAccountType().name());
+        details.put("assignedTo", targetUser.getEmail());
+        if (!actor.getId().equals(targetUser.getId())) {
+            details.put("createdByAdmin", actor.getEmail());
+        }
+
         auditService.recordEvent(
-                user,
+                actor,
                 "ACCOUNT_CREATED",
                 "ACCOUNT",
                 saved.getId(),
-                Map.of(
-                        "accountNumber", saved.getAccountNumber(),
-                        "currency", saved.getCurrency(),
-                        "accountType", saved.getAccountType().name()
-                )
+                details
         );
 
         return AccountResponse.fromEntity(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AccountResponse> getAllCustomerAccounts() {
+        return accountRepository.findAllByAccountType(AccountType.CUSTOMER)
+                .stream()
+                .map(AccountResponse::fromEntity)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -67,6 +85,20 @@ public class AccountService {
                 .stream()
                 .map(AccountResponse::fromEntity)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public AccountResponse getAccountByIdForAdmin(UUID accountId) {
+        AccountEntity account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
+        return AccountResponse.fromEntity(account);
+    }
+
+    @Transactional(readOnly = true)
+    public AccountBalanceResponse getAccountBalanceForAdmin(UUID accountId) {
+        AccountEntity account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
+        return new AccountBalanceResponse(account.getId(), account.getAccountNumber(), account.getCurrency(), account.getBalance());
     }
 
     @Transactional(readOnly = true)

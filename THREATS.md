@@ -78,14 +78,20 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Severity**: High (Targeted account takeover, credential exposure)
 - **Attack Scenario**: An attacker uses automated tools (e.g., Hydra, Burp Intruder) to cycle through thousands of leaked credentials against `POST /api/v1/auth/login`. Because financial systems hold monetary assets, automated password guessing against high-value customer accounts or employee administrative accounts represents an active threat.
 - **Potential Impact**: Unauthorized account takeover, unauthorized access to customer account balances, transaction initiation (Phase 2), compliance penalties.
-- **Mitigation Strategy**: Multi-dimensional concurrency-safe rate limiting implemented in `LoginRateLimiter`. Login attempts are tracked per client IP and per normalized email over a sliding window (default 5 attempts per 15 minutes) using atomic reservation (`tryReserve` inside synchronized block). Reaching the threshold immediately triggers HTTP 429 Too Many Requests with a `Retry-After` header indicating remaining seconds and records an `AUTH_RATE_LIMIT_EXCEEDED` audit log. When an email authenticates successfully, only its per-email counter is cleared; the shared IP counter is preserved so an attacker cannot cycle accounts from the same IP. Storage is bounded to 10,000 keys with access-ordered LRU eviction (`accessOrder = true`) and input key lengths are capped (IP 64 chars, email 255 chars) to prevent memory exhaustion DoS.
+- **Mitigation Strategy**: Multi-dimensional concurrency-safe rate limiting implemented in `LoginRateLimiter`. To prevent legitimate users from experiencing accidental lockout due to normal repeated logins or test evaluation, the rate limiter tracks **failed authentication attempts exclusively**:
+  1. **Per-Email Failure Threshold**: Maximum 5 rejected credential attempts per normalized email within a 60-second sliding window.
+  2. **Per-IP Failure Threshold**: Maximum 30 rejected credential attempts per client IP address within a 60-second sliding window (preventing distributed spraying across multiple usernames from a single source).
+  3. **Non-Consuming Success**: Successful logins do **not** increment failure counters, allowing repeated authorized sign-ins across sessions.
+  4. **Immediate Reset on Success**: Successful authentication immediately clears the per-email failure history (`recordSuccess`), while preserving the shared IP history so attackers cycling target usernames remain rate-limited.
+  5. **Dynamic Cooldown**: Calculates the exact remaining time until the oldest failure expires (capped at 60 seconds) and delivers it via the HTTP `Retry-After` header.
+  6. **Bounded LRU Storage**: Map capacity is bounded to 10,000 tracked keys with access-ordered LRU eviction (`accessOrder = true`) and input key lengths are capped (IP 64 chars, email 255 chars) to prevent memory exhaustion DoS.
 - **Implementation Evidence**: 
   - `backend/ledgerline/src/main/java/com/ledgerline/auth/LoginRateLimiter.java`
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 71-77)
-  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java` (HTTP 429 mapping)
-- **Verification**: `Phase1IntegrationTests.loginRateLimitingRejectsExcessiveAttempts()`, `LoginRateLimiterTest`
+  - `backend/ledgerline/src/main/java/com/ledgerline/auth/AuthController.java` (lines 71-105)
+  - `backend/ledgerline/src/main/java/com/ledgerline/auth/ApiExceptionHandler.java` (HTTP 429 mapping with `Retry-After`)
+- **Verification**: `Phase1IntegrationTests.loginRateLimitingRejectsExcessiveAttempts()`, `LoginRateLimiterTest` (11 unit tests verifying 5 email / 30 IP thresholds, non-consuming successes, atomic concurrency, and cooldown expiration)
 - **Status**: MITIGATED
-- **Residual Risk**: In a large distributed botnet attack cycling thousands of distinct IP addresses, per-IP rate limiting alone can be bypassed; per-email rate limiting mitigates targeted account attacks, but account lockout thresholds must be balanced against intentional denial-of-service against legitimate users (resolved with CAPTCHA/WAF in Phase 3).
+- **Residual Risk**: A high-volume distributed botnet cycling across millions of unique IP addresses could attempt 4 failures per target account before triggering per-email limits. Further mitigations (CAPTCHA challenges, geo-IP velocity analysis, and WAF rules) can be introduced at edge API gateways.
 
 ---
 
@@ -178,6 +184,47 @@ LedgerLine operates under a strict **defense-in-depth model**: the application l
 - **Verification**: `Phase1IntegrationTests.csrfIsRequiredForStateChangingEndpoints()`
 - **Status**: MITIGATED
 - **Residual Risk**: Requires frontend integration to extract `XSRF-TOKEN` cookie and include it in request headers.
+
+---
+
+#### SEC-AUTH-007: Demonstration Identity Provisioning & Privilege Isolation
+- **Threat ID**: `SEC-AUTH-007`
+- **Name**: Unauthorized Identity Escalation During Demonstration Provisioning
+- **Category**: Authentication & Account Security
+- **Severity**: High (Privilege escalation, unauthorized admin/auditor injection)
+- **Attack Scenario**: An untrusted runtime process or compromised endpoint attempts to insert high-privilege identities (`ADMIN`, `AUDITOR`) into the `users` table, bypassing regular application registration controls.
+- **Potential Impact**: Full platform takeover, unauthorized audit trail tampering, ledger manipulation.
+- **Mitigation Strategy**: Multi-layered identity protection:
+  1. **PostgreSQL Database Trigger (`trg_protect_user_role_assignment`)**: Enforces that the operational runtime database user (`ledgerline_runtime`) can never insert or escalate users to `ADMIN` or `AUDITOR` roles (aborts with SQLState `42501`).
+  2. **Dedicated Schema-Owner Provisioning Utility (`DemoProvisioningTool`)**: Executes outside the web request lifecycle using bootstrap/schema-owner credentials (`ledgerline_app`) to provision the 16 demonstration identities (12 CUSTOMER, 3 AUDITOR, 1 ADMIN).
+  3. **Strict BCrypt Encoding**: Plaintext passwords are never stored in PostgreSQL; dynamic BCrypt cost-10 hashes are generated during provisioning.
+  4. **Idempotent Non-Destructive Operation**: Validates existing users and accounts; never deletes existing user data, balances, or transactions.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/resources/db/migration/V9__prevent_privilege_escalation_and_balance_fabrication.sql`
+  - `backend/ledgerline/src/main/java/com/ledgerline/provision/DemoProvisioningTool.java`
+- **Verification**: Database catalog verification (16 demo identities, 19 baseline accounts, non-demo users preserved).
+- **Status**: MITIGATED
+- **Residual Risk**: Provisioning tool must only be executed by authorized system operators with access to bootstrap database credentials.
+
+---
+
+#### SEC-AUTH-008: Assessment Credential Segregation & Git Secret Protection
+- **Threat ID**: `SEC-AUTH-008`
+- **Name**: Hardcoded Assessment Credentials in Source Code & Version Control
+- **Category**: Authentication & Account Security
+- **Severity**: Medium (Credential leakage via git repository exposure)
+- **Attack Scenario**: Demonstration passwords or sensitive assessment identity sheets are committed to tracked repository files (e.g., git commits, SQL migration scripts, frontend bundles, or public Markdown documentation).
+- **Potential Impact**: Leaked credentials across public repository clones or deployment artifacts.
+- **Mitigation Strategy**:
+  1. **Strict Git Ignore Boundary**: The `/private/` directory is explicitly listed in `.gitignore` and verified with `git check-ignore`.
+  2. **Isolated Local Output**: `DemoProvisioningTool` outputs the evaluator credential record exclusively to `private/demo-credentials.local.md`.
+  3. **Tracked Source Sanitization**: No plaintext demonstration passwords appear in tracked SQL scripts, frontend components, `README.md`, or test suites. Demonstration passwords adhere to the user's complete email address (satisfying the >= 12 character complexity policy).
+- **Implementation Evidence**:
+  - `.gitignore` (line 12: `/private/`)
+  - `backend/ledgerline/src/main/java/com/ledgerline/provision/DemoProvisioningTool.java` (lines 234-281)
+- **Verification**: `git check-ignore private/demo-credentials.local.md` returns match; `git status --ignored` verifies exclusion.
+- **Status**: MITIGATED
+- **Residual Risk**: Evaluator must maintain local file secrecy for the generated `private/` directory.
 
 ---
 

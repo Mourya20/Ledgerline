@@ -1,0 +1,273 @@
+import React, { useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { ApiException } from '../api/client';
+
+export const SignInPage: React.FC = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Check if directed from registration with success flag
+  const registrationSuccess = (location.state as { registered?: boolean })?.registered;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!email.trim() || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const loggedInUser = await login({ email: email.trim(), password });
+      if (loggedInUser.role === 'AUDITOR') {
+        navigate('/auditor');
+      } else if (loggedInUser.role === 'ADMIN') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
+    } catch (err) {
+      if (err instanceof ApiException) {
+        if (err.status === 429) {
+          const waitTime = err.retryAfter ? `${err.retryAfter} seconds` : 'the cooldown window';
+          setError(`Too many failed login attempts. Please wait ${waitTime} before trying again.`);
+        } else if (err.status === 401 || err.status === 403) {
+          setError('Invalid email or password.');
+        } else {
+          setError(err.message || 'Login failed. Please check your credentials.');
+        }
+      } else {
+        setError('Network error or server unreachable. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePrefill = (sampleEmail: string, samplePassword: string) => {
+    setEmail(sampleEmail);
+    setPassword(samplePassword);
+    setError(null);
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#F7F8FA',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+      position: 'relative'
+    }}>
+      {/* Top Left Brand Title linking to Home */}
+      <header style={{
+        position: 'absolute',
+        top: '24px',
+        left: '28px',
+        zIndex: 10
+      }}>
+        <Link
+          to="/"
+          style={{
+            fontSize: '20px',
+            fontWeight: 700,
+            color: '#111827',
+            textDecoration: 'none',
+            letterSpacing: '-0.02em',
+            display: 'inline-flex',
+            alignItems: 'center'
+          }}
+        >
+          LedgerLine
+        </Link>
+      </header>
+
+      <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '32px' }}>
+        <div style={{ fontSize: '13px', color: '#6B7280', fontWeight: 500, marginBottom: '6px' }}>
+          LedgerLine
+        </div>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '24px' }}>
+          Sign in
+        </h1>
+
+        {registrationSuccess && (
+          <div className="alert-success" style={{ marginBottom: '16px' }}>
+            Account created successfully. Please sign in below.
+          </div>
+        )}
+
+        {error && (
+          <div className="alert-error" style={{ marginBottom: '16px' }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              className="form-input"
+              placeholder="customer1@ledgerline.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isSubmitting}
+              autoComplete="email"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              className="form-input"
+              placeholder="•••••••• (e.g. customer1@ledgerline.com)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isSubmitting}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="btn-primary"
+            style={{ width: '100%', marginTop: '8px', padding: '11px' }}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Signing in...' : 'Sign in'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: '#4B5563' }}>
+          New customer?{' '}
+          <Link to="/register" style={{ color: '#0D6E64', fontWeight: 500 }}>
+            Create an account
+          </Link>
+        </div>
+
+        {/* Sample Roles Quick Fill */}
+        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #E5E7EB' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#6B7280', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Quick Sign-In Samples
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              fontSize: '12px'
+            }}>
+              <div>
+                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Customer</span>
+                <code style={{ fontSize: '11px', color: '#4B5563' }}>customer1@ledgerline.com</code>
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePrefill('customer1@ledgerline.com', 'customer1@ledgerline.com')}
+                disabled={isSubmitting}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#0D6E64',
+                  backgroundColor: '#E6F4F1',
+                  border: 'none',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Fill
+              </button>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              fontSize: '12px'
+            }}>
+              <div>
+                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Auditor</span>
+                <code style={{ fontSize: '11px', color: '#4B5563' }}>auditor1@ledgerline.com</code>
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePrefill('auditor1@ledgerline.com', 'auditor1@ledgerline.com')}
+                disabled={isSubmitting}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#0369A1',
+                  backgroundColor: '#E0F2FE',
+                  border: 'none',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Fill
+              </button>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              fontSize: '12px'
+            }}>
+              <div>
+                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Administrator</span>
+                <code style={{ fontSize: '11px', color: '#4B5563' }}>admin1@ledgerline.com</code>
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePrefill('admin1@ledgerline.com', 'admin1@ledgerline.com')}
+                disabled={isSubmitting}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#7C2D12',
+                  backgroundColor: '#FFEDD5',
+                  border: 'none',
+                  padding: '3px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Fill
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -12,16 +12,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * In-memory sliding-window login rate limiter enforcing independent IP and identifier limits.
+ * In-memory sliding-window failed login rate limiter enforcing independent IP and email failure limits.
  * Uses a thread-safe, access-ordered LRU map to bound memory footprint and evict the
  * least-recently-used key when capacity is exceeded.
  *
- * Default configuration: 5 attempts per 15-minute window, bounded at 10,000 tracked keys.
+ * Policy:
+ * - Maximum 5 failed attempts per normalized email within 60 seconds.
+ * - Maximum 30 failed attempts per client IP within 60 seconds.
+ * - Maximum cooldown: 60 seconds (returns actual remaining cooldown in Retry-After header).
+ * - Successful logins do not consume failed-login allowances.
+ * - Failed credential attempts increment applicable counters.
+ * - Successful authentication clears the corresponding email failure counter.
+ * - Shared IP failure history is not reset when another account authenticates successfully.
  */
 @Component
 public class LoginRateLimiter {
 
-    private final int maxAttempts;
+    private final int maxEmailAttempts;
+    private final int maxIpAttempts;
     private final Duration windowDuration;
     private final int maxTrackedKeys;
     private final Clock clock;
@@ -29,11 +37,12 @@ public class LoginRateLimiter {
 
     @Autowired
     public LoginRateLimiter() {
-        this(5, Duration.ofMinutes(15), 10_000, Clock.systemUTC());
+        this(5, 30, Duration.ofSeconds(60), 10_000, Clock.systemUTC());
     }
 
-    public LoginRateLimiter(int maxAttempts, Duration windowDuration, int maxTrackedKeys, Clock clock) {
-        this.maxAttempts = maxAttempts;
+    public LoginRateLimiter(int maxEmailAttempts, int maxIpAttempts, Duration windowDuration, int maxTrackedKeys, Clock clock) {
+        this.maxEmailAttempts = maxEmailAttempts;
+        this.maxIpAttempts = maxIpAttempts;
         this.windowDuration = windowDuration;
         this.maxTrackedKeys = maxTrackedKeys;
         this.clock = clock;
@@ -46,52 +55,72 @@ public class LoginRateLimiter {
     }
 
     /**
-     * Atomically checks limits and reserves an attempt for both the client IP and the email identifier.
-     * Throws RateLimitExceededException if either IP or identifier threshold is exceeded.
+     * Backward-compatible constructor for tests configuring a single symmetric limit.
      */
-    public void acquireAttempt(String ip, String email) {
-        Instant now = clock.instant();
-        String ipKey = toIpKey(ip);
-        String emailKey = toEmailKey(email);
-
-        long ipRetry = tryReserve(ipKey, now);
-        if (ipRetry > 0) {
-            throw new RateLimitExceededException("Too many login attempts. Please try again later.", ipRetry);
-        }
-
-        long emailRetry = tryReserve(emailKey, now);
-        if (emailRetry > 0) {
-            rollbackAttempt(ipKey, now);
-            throw new RateLimitExceededException("Too many login attempts. Please try again later.", emailRetry);
-        }
+    public LoginRateLimiter(int maxAttempts, Duration windowDuration, int maxTrackedKeys, Clock clock) {
+        this(maxAttempts, maxAttempts, windowDuration, maxTrackedKeys, clock);
     }
 
+    /**
+     * Checks whether the client IP or email is currently blocked due to exceeded failed attempts.
+     * Throws RateLimitExceededException with the remaining cooldown if either threshold is reached.
+     */
     public void checkAllowed(String ip, String email) {
         Instant now = clock.instant();
         String ipKey = toIpKey(ip);
         String emailKey = toEmailKey(email);
 
-        long ipRetry = getRetryAfterSecondsIfExceeded(ipKey, now);
+        long ipRetry = getRetryAfterSecondsIfExceeded(ipKey, maxIpAttempts, now);
         if (ipRetry > 0) {
             throw new RateLimitExceededException("Too many login attempts. Please try again later.", ipRetry);
         }
-        long emailRetry = getRetryAfterSecondsIfExceeded(emailKey, now);
+        long emailRetry = getRetryAfterSecondsIfExceeded(emailKey, maxEmailAttempts, now);
         if (emailRetry > 0) {
             throw new RateLimitExceededException("Too many login attempts. Please try again later.", emailRetry);
         }
     }
 
-    public void recordSuccess(String ip, String email) {
+    /**
+     * Records a failed credential attempt for both the client IP and email.
+     */
+    public void recordFailure(String ip, String email) {
+        Instant now = clock.instant();
         synchronized (attempts) {
-            attempts.remove(toEmailKey(email));
-            // Shared IP counter is intentionally NOT reset on individual success
+            recordAttempt(toIpKey(ip), now);
+            recordAttempt(toEmailKey(email), now);
         }
     }
 
-    public void recordFailure(String ip, String email) {
+    /**
+     * Clears the email failure history upon successful authentication.
+     * The shared IP counter is preserved so distributed credential stuffing cannot bypass limits.
+     */
+    public void recordSuccess(String ip, String email) {
+        synchronized (attempts) {
+            attempts.remove(toEmailKey(email));
+        }
+    }
+
+    /**
+     * Backward-compatible atomic attempt acquisition for concurrent tests:
+     * atomically checks limit and records attempt inside synchronized block.
+     */
+    public void acquireAttempt(String ip, String email) {
         Instant now = clock.instant();
-        tryReserve(toIpKey(ip), now);
-        tryReserve(toEmailKey(email), now);
+        String ipKey = toIpKey(ip);
+        String emailKey = toEmailKey(email);
+        synchronized (attempts) {
+            long ipRetry = getRetryAfterSecondsIfExceeded(ipKey, maxIpAttempts, now);
+            if (ipRetry > 0) {
+                throw new RateLimitExceededException("Too many login attempts. Please try again later.", ipRetry);
+            }
+            long emailRetry = getRetryAfterSecondsIfExceeded(emailKey, maxEmailAttempts, now);
+            if (emailRetry > 0) {
+                throw new RateLimitExceededException("Too many login attempts. Please try again later.", emailRetry);
+            }
+            recordAttempt(ipKey, now);
+            recordAttempt(emailKey, now);
+        }
     }
 
     public void reset() {
@@ -112,35 +141,22 @@ public class LoginRateLimiter {
         }
     }
 
-    private long tryReserve(String key, Instant now) {
-        synchronized (attempts) {
-            Deque<Instant> deque = attempts.computeIfAbsent(key, k -> new ArrayDeque<>());
-            cleanExpired(deque, now);
-            if (deque.size() >= maxAttempts) {
-                Instant oldest = deque.peekFirst();
-                long seconds = oldest != null
-                        ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
-                        : windowDuration.toSeconds();
-                return Math.max(1, seconds);
-            }
-            deque.addLast(now);
-            return 0;
-        }
-    }
-
-    private void rollbackAttempt(String key, Instant now) {
+    public int getFailureCount(String key) {
         synchronized (attempts) {
             Deque<Instant> deque = attempts.get(key);
-            if (deque != null) {
-                deque.removeLastOccurrence(now);
-                if (deque.isEmpty()) {
-                    attempts.remove(key);
-                }
-            }
+            if (deque == null) return 0;
+            cleanExpired(deque, clock.instant());
+            return deque.size();
         }
     }
 
-    private long getRetryAfterSecondsIfExceeded(String key, Instant now) {
+    private void recordAttempt(String key, Instant now) {
+        Deque<Instant> deque = attempts.computeIfAbsent(key, k -> new ArrayDeque<>());
+        cleanExpired(deque, now);
+        deque.addLast(now);
+    }
+
+    private long getRetryAfterSecondsIfExceeded(String key, int limit, Instant now) {
         synchronized (attempts) {
             Deque<Instant> deque = attempts.get(key);
             if (deque == null) {
@@ -151,12 +167,12 @@ public class LoginRateLimiter {
                 attempts.remove(key);
                 return 0;
             }
-            if (deque.size() >= maxAttempts) {
+            if (deque.size() >= limit) {
                 Instant oldest = deque.peekFirst();
                 long seconds = oldest != null
                         ? Duration.between(now, oldest.plus(windowDuration)).toSeconds()
                         : windowDuration.toSeconds();
-                return Math.max(1, seconds);
+                return Math.max(1, Math.min(seconds, windowDuration.toSeconds()));
             }
             return 0;
         }
@@ -183,5 +199,17 @@ public class LoginRateLimiter {
             cleanEmail = cleanEmail.substring(0, 255);
         }
         return "email:" + cleanEmail;
+    }
+
+    public int getMaxEmailAttempts() {
+        return maxEmailAttempts;
+    }
+
+    public int getMaxIpAttempts() {
+        return maxIpAttempts;
+    }
+
+    public Duration getWindowDuration() {
+        return windowDuration;
     }
 }

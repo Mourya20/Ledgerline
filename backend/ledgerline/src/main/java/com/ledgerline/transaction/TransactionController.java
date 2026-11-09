@@ -84,6 +84,9 @@ public class TransactionController {
             @RequestParam(required = false) UUID accountId,
             Pageable pageable) {
         UserEntity user = resolveUser(authentication);
+        if (user.getRole() == com.ledgerline.domain.UserRole.ADMIN) {
+            return ResponseEntity.ok(transactionService.getTransactionsForAdmin(accountId, pageable));
+        }
         return ResponseEntity.ok(transactionService.getTransactions(user.getId(), accountId, pageable));
     }
 
@@ -92,6 +95,9 @@ public class TransactionController {
             Authentication authentication,
             @PathVariable UUID transactionId) {
         UserEntity user = resolveUser(authentication);
+        if (user.getRole() == com.ledgerline.domain.UserRole.ADMIN) {
+            return ResponseEntity.ok(transactionService.getTransactionByIdForAdmin(transactionId));
+        }
         return ResponseEntity.ok(transactionService.getTransactionById(transactionId, user.getId()));
     }
 

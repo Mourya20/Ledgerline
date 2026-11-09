@@ -21,6 +21,28 @@ public record TransactionEntryResponse(
         return fromEntity(entity, null);
     }
 
+    public static TransactionEntryResponse fromEntityForAdmin(LedgerEntryEntity entity) {
+        var account = entity.getAccount();
+        if (account == null || account.getAccountType() == AccountType.SYSTEM) {
+            return new TransactionEntryResponse(
+                entity.getId(),
+                null,
+                SYSTEM_COUNTERPART_LABEL,
+                entity.getEntryType(),
+                entity.getAmount(),
+                entity.getCurrency()
+            );
+        }
+        return new TransactionEntryResponse(
+            entity.getId(),
+            account.getId(),
+            account.getAccountNumber(),
+            entity.getEntryType(),
+            entity.getAmount(),
+            entity.getCurrency()
+        );
+    }
+
     public static TransactionEntryResponse fromEntity(LedgerEntryEntity entity, UUID viewerUserId) {
         var account = entity.getAccount();
         if (account == null || account.getAccountType() == AccountType.SYSTEM) {
