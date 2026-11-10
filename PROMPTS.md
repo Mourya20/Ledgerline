@@ -832,3 +832,58 @@ Strict constraints were enforced:
   - \`VaultoraApplicationTests\`: 1 test passed (100%).
 - **Frontend Test Suite**: **32 tests passed (100%)** across 6 test suites.
 - **Frontend Production Bundle Build**: \`tsc -b && vite build\` built cleanly in 488ms with 0 errors.
+
+---
+
+## 19. Phase 6 — Mandatory Administrator Approval for Customer Account Opening
+
+### Requirements Summary
+1. **Mandatory Administrator Approval for New Customer Accounts**:
+   - Customer account opening now follows a governed request-and-approval lifecycle.
+   - When a Customer requests to open a bank account, an account opening request is created in `PENDING` status.
+   - An Administrator reviews pending requests in the Admin Portal and can either "Accept & Open Account" (which creates the bank account under the customer's ownership) or "Reject" with optional notes.
+   - Customers can inspect pending requests and receive immediate visual feedback on their Accounts page.
+   - Customers are restricted to one pending request at a time to prevent request flooding.
+2. **Account Closure Remains Immediate & Self-Service**:
+   - In accordance with specifications, zero-balance account closure does **NOT** require administrator approval.
+   - Customers can continue to close zero-balance accounts immediately without administrative friction.
+   - UX resilience: modal interactions strictly clear stale page errors, isolating closure failures to the contextual modal alert (`closeError`).
+3. **Database Privilege & Schema Design**:
+   - Flyway migration `V11__account_opening_requests.sql` created table `account_requests`.
+   - Granted only `SELECT, INSERT` on `account_requests` to runtime role `ledgerline_runtime`.
+   - Direct column-level `UPDATE` was completely withheld from `ledgerline_runtime` on `account_requests`, maintaining 100% compliance with `Phase2FinancialEngineIntegrationTests` security catalog invariants.
+   - Created PostgreSQL `SECURITY DEFINER` stored procedure `review_account_request(UUID, VARCHAR, VARCHAR, VARCHAR, UUID)` owned by schema owner `ledgerline_app`.
+4. **Backend Implementation**:
+   - Domain entity `AccountRequestEntity` with `AccountRequestStatus` (`PENDING`, `APPROVED`, `REJECTED`).
+   - Repository `AccountRequestRepository` with query methods for user requests and pending queues.
+   - Service `AccountRequestService` with `createRequest`, `getUserRequests`, `getAllRequests`, and `reviewRequest` (with persistence context flush/clear orchestration).
+   - Controller `AccountRequestController` exposed at `/api/v1/account-requests`.
+   - Security: `SecurityConfig` enforces that only `CUSTOMER` can submit requests, only `ADMIN` can approve/reject, and `AUDITOR` can view requests for compliance oversight.
+5. **Frontend Implementation**:
+   - Customer Portal (`AccountsPage.tsx`):
+     - "+ Open new account" modal updated to "Request New Bank Account" explaining the administrator approval process.
+     - Displays active "Awaiting Administrator Approval" banner for pending requests.
+     - Zero-balance account closure remains direct and immediate with clean modal error handling.
+   - Admin Portal (`AdminPage.tsx`):
+     - Added dedicated "Account Requests" tab with real-time pending request count badges.
+     - Filterable by Pending, Approved, Rejected, or All.
+     - 1-click "Accept & Open" creates the bank account for the customer and displays the new account number.
+     - 1-click "Reject" with optional review/rejection notes.
+   - Added frontend unit test suite `accountRequests.test.ts`.
+
+### Verification Results
+- **Backend Test Suite**: **134 tests run, 134 passed, 0 failures, 0 errors** (`BUILD SUCCESS`).
+  - `AccountManagementIntegrationTests`: 23 tests passed (100%), including:
+    - `customerCanSubmitAccountOpeningRequest`
+    - `customerCannotSubmitDuplicatePendingRequest`
+    - `customerCanViewOwnAccountRequests`
+    - `auditorCanViewRequestsButCannotApprove` (403 Forbidden check)
+    - `adminCanApproveAccountRequest` (verifies account creation and status change)
+    - `adminCanRejectAccountRequest`
+  - `Phase2FinancialEngineIntegrationTests`: 56 tests passed (100%), including all 22 Security & Authorization database catalog tests.
+  - `Phase1IntegrationTests`: 31 tests passed (100%).
+  - `RuntimeRoleApplicationIntegrationTest`: 8 tests passed (100%).
+  - Rate Limiter and UTF-8 Byte Validator tests: 15 tests passed (100%).
+  - `VaultoraApplicationTests`: 1 test passed (100%).
+- **Frontend Test Suite**: **36 tests passed (100%)** across 7 test files.
+- **Frontend Production Bundle Build**: `tsc -b && vite build` built cleanly with 0 errors.

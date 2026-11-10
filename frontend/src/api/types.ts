@@ -80,6 +80,30 @@ export interface TransferRequest {
   currency: string;
 }
 
+export type AccountRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface AccountRequest {
+  id: string;
+  userId: string;
+  userEmail: string;
+  currency: string;
+  status: AccountRequestStatus;
+  adminNotes?: string | null;
+  reviewedBy?: string | null;
+  accountId?: string | null;
+  accountNumber?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAccountOpeningRequest {
+  currency: string;
+}
+
+export interface ReviewAccountRequest {
+  adminNotes?: string;
+}
+
 export interface CreateAccountRequest {
   currency?: string;
   customerEmail?: string;

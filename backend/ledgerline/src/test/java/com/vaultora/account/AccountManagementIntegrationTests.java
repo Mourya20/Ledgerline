@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,7 +26,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import com.vaultora.domain.AccountEntity;
 import com.vaultora.domain.AccountStatus;
@@ -34,6 +37,7 @@ import com.vaultora.domain.UserEntity;
 import com.vaultora.domain.UserRole;
 import com.vaultora.domain.UserStatus;
 import com.vaultora.repository.AccountRepository;
+import com.vaultora.repository.AccountRequestRepository;
 import com.vaultora.repository.UserRepository;
 import com.vaultora.transaction.TransactionService;
 import com.vaultora.transaction.dto.DepositRequest;
@@ -53,6 +57,12 @@ public class AccountManagementIntegrationTests {
     private AccountRepository accountRepository;
 
     @Autowired
+    private AccountRequestRepository accountRequestRepository;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private TransactionService transactionService;
 
     @Autowired
@@ -68,6 +78,26 @@ public class AccountManagementIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        accountRequestRepository.deleteAll();
+        jdbcTemplate.update("""
+                INSERT INTO accounts (
+                    id, account_number, owner_user_id, account_type, currency, status, balance, normal_balance, allow_negative, created_at, updated_at
+                )
+                VALUES (
+                    '00000000-0000-0000-0000-000000000001',
+                    'SYS-INR-CASH-VAULT-001',
+                    NULL,
+                    'SYSTEM',
+                    'INR',
+                    'ACTIVE',
+                    0.00,
+                    'DEBIT',
+                    FALSE,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (account_number) DO NOTHING
+                """);
         customer1 = createOrGetUser("cust_mgmt_1@vaultora.com", UserRole.CUSTOMER);
         customer2 = createOrGetUser("cust_mgmt_2@vaultora.com", UserRole.CUSTOMER);
         admin = createOrGetUser("admin_mgmt@vaultora.com", UserRole.ADMIN);
@@ -386,5 +416,160 @@ public class AccountManagementIntegrationTests {
                         newEmail, newId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Newly onboarded users can only be assigned CUSTOMER or AUDITOR role")));
+    }
+
+    @Test
+    @DisplayName("Customer can submit account opening request")
+    void customerCanSubmitAccountOpeningRequest() throws Exception {
+        MockHttpSession session = createSession(customer1);
+
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.currency").value("INR"))
+                .andExpect(jsonPath("$.userEmail").value(customer1.getEmail()));
+    }
+
+    @Test
+    @DisplayName("Customer cannot submit duplicate pending account opening request")
+    void customerCannotSubmitDuplicatePendingRequest() throws Exception {
+        MockHttpSession session = createSession(customer1);
+
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("You already have a pending account opening request")));
+    }
+
+    @Test
+    @DisplayName("Customer can view own account requests but not other customers'")
+    void customerCanViewOwnAccountRequests() throws Exception {
+        MockHttpSession session1 = createSession(customer1);
+        MockHttpSession session2 = createSession(customer2);
+
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session1)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/account-requests")
+                .session(session1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].userEmail").value(customer1.getEmail()));
+
+        mockMvc.perform(get("/api/v1/account-requests")
+                .session(session2))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("Auditor can view account requests but cannot approve or reject them")
+    void auditorCanViewRequestsButCannotApprove() throws Exception {
+        MockHttpSession custSession = createSession(customer1);
+        MockHttpSession auditorSession = createSession(auditor);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/account-requests")
+                .session(custSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String json = result.getResponse().getContentAsString();
+        String requestId = com.jayway.jsonpath.JsonPath.read(json, "$.id");
+
+        mockMvc.perform(get("/api/v1/account-requests")
+                .session(auditorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        mockMvc.perform(post("/api/v1/account-requests/" + requestId + "/approve")
+                .session(auditorSession)
+                .with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Admin can approve account request which creates bank account for customer")
+    void adminCanApproveAccountRequest() throws Exception {
+        MockHttpSession custSession = createSession(customer1);
+        MockHttpSession adminSession = createSession(admin);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/account-requests")
+                .session(custSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String json = result.getResponse().getContentAsString();
+        String requestId = com.jayway.jsonpath.JsonPath.read(json, "$.id");
+
+        MvcResult approvedResult = mockMvc.perform(post("/api/v1/account-requests/" + requestId + "/approve")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"adminNotes\":\"Identity verified. Account opened.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.accountNumber").isNotEmpty())
+                .andExpect(jsonPath("$.reviewedBy").value(admin.getEmail()))
+                .andReturn();
+
+        String approvedJson = approvedResult.getResponse().getContentAsString();
+        String newAccNumber = com.jayway.jsonpath.JsonPath.read(approvedJson, "$.accountNumber");
+
+        AccountEntity createdAcc = accountRepository.findByAccountNumber(newAccNumber).orElseThrow();
+        assertEquals(customer1.getId(), createdAcc.getOwner().getId());
+        assertEquals(AccountStatus.ACTIVE, createdAcc.getStatus());
+        assertEquals(new BigDecimal("0.00"), createdAcc.getBalance());
+    }
+
+    @Test
+    @DisplayName("Admin can reject account request")
+    void adminCanRejectAccountRequest() throws Exception {
+        MockHttpSession custSession = createSession(customer1);
+        MockHttpSession adminSession = createSession(admin);
+
+        MvcResult result = mockMvc.perform(post("/api/v1/account-requests")
+                .session(custSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String json = result.getResponse().getContentAsString();
+        String requestId = com.jayway.jsonpath.JsonPath.read(json, "$.id");
+
+        mockMvc.perform(post("/api/v1/account-requests/" + requestId + "/reject")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"adminNotes\":\"Incomplete KYC documents\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.reviewedBy").value(admin.getEmail()))
+                .andExpect(jsonPath("$.accountNumber").doesNotExist());
     }
 }

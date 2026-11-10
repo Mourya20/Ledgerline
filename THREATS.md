@@ -375,6 +375,28 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
   - `backend/ledgerline/src/main/java/com/vaultora/account/AccountController.java` (`createAccount`)
 - **Verification**: `AccountManagementIntegrationTests.adminCanAssignPasswordToCustomer()`, `AccountManagementIntegrationTests.adminCanAssignPasswordToAuditor()`, `AccountManagementIntegrationTests.adminCannotAssignPasswordToAdmin()`, `AccountManagementIntegrationTests.adminCanOpenAccountForNonExistingAuditorWithAssignedRole()`, `AccountManagementIntegrationTests.adminCannotAssignAdminRoleDuringOnboarding()`, `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests.runtimeRoleColumnGrantsLimitUpdateStrictly()`
 
+
+#### SEC-AUTHZ-009: Customer Account Opening Request Lifecycle & Direct Modification Bypass
+- **Threat ID**: `SEC-AUTHZ-009`
+- **Name**: Unauthorized Account Creation or Direct Status Tampering in Account Requests
+- **Category**: Authorization / Privilege Boundary
+- **Severity**: High (Unauthorized account creation, approval bypass)
+- **Attack Scenario**: A customer attempts to directly open accounts without administrative authorization, or tampers directly with the `account_requests` database table to alter status from `PENDING` to `APPROVED`. Alternatively, an auditor or non-admin attempts to approve or reject account opening requests.
+- **Mitigation Strategy**:
+  1. Mandatory Approval Workflow: Customers can only submit account opening requests (`POST /api/v1/account-requests`). Newly submitted requests enter `PENDING` status and cannot activate accounts immediately.
+  2. Rate / Concurrency Defense: Customers are restricted to one active `PENDING` request at a time, preventing denial-of-service or flood attacks against administrators.
+  3. Role Separation: Only users with `ROLE_ADMIN` can approve or reject requests (`POST /api/v1/account-requests/{id}/approve` and `/reject`). Users with `ROLE_AUDITOR` can view requests for compliance auditing but cannot perform approvals (enforced with HTTP 403 Forbidden).
+  4. Database Privilege Isolation: `ledgerline_runtime` possesses NO direct `UPDATE` privileges on table `account_requests`. Approvals and rejections are executed exclusively through PostgreSQL `SECURITY DEFINER` stored procedure `review_account_request(UUID, VARCHAR, VARCHAR, VARCHAR, UUID)`, preserving `Phase2FinancialEngineIntegrationTests` least-privilege database catalog guarantees.
+  5. Account Closure Invariant: Self-service closure for zero-balance customer accounts remains direct and independent, ensuring customers can freely exit accounts with zero funds without administrative bottleneck.
+  6. Immutable Audit Trail: Every request creation, approval, and rejection emits immutable audit events (`ACCOUNT_REQUEST_CREATED`, `ACCOUNT_REQUEST_APPROVED`, `ACCOUNT_REQUEST_REJECTED`).
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/resources/db/migration/V11__account_opening_requests.sql`
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountRequestService.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountRequestController.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/security/SecurityConfig.java`
+- **Verification**: `AccountManagementIntegrationTests.customerCanSubmitAccountOpeningRequest()`, `AccountManagementIntegrationTests.customerCannotSubmitDuplicatePendingRequest()`, `AccountManagementIntegrationTests.auditorCanViewRequestsButCannotApprove()`, `AccountManagementIntegrationTests.adminCanApproveAccountRequest()`, `AccountManagementIntegrationTests.adminCanRejectAccountRequest()`
+- **Status**: MITIGATED
+
 ### Category C: Financial & Ledger Integrity (Highest Priority)
 
 #### SEC-FIN-001: Race Conditions & Concurrent Double-Spending

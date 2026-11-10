@@ -5,12 +5,14 @@ import { healthApi } from '../api/health';
 import { accountsApi } from '../api/accounts';
 import { adminApi } from '../api/admin';
 import { transactionsApi } from '../api/transactions';
+import { accountRequestsApi } from '../api/accountRequests';
 import type {
   HealthResponse,
   AccountResponse,
   UserSummaryResponse,
   AdminStatsResponse,
   TransactionResponse,
+  AccountRequest,
   AccountStatus,
   UserStatus,
 } from '../api/types';
@@ -38,7 +40,7 @@ const DEMO_AUDITORS: string[] = [
   'auditor3@ledgerline.com',
 ];
 
-type AdminTab = 'overview' | 'accounts' | 'users' | 'transactions' | 'deposit';
+type AdminTab = 'overview' | 'accounts' | 'requests' | 'users' | 'transactions' | 'deposit';
 
 export const AdminPage: React.FC = () => {
   const { user, logout } = useAuth();
@@ -53,6 +55,26 @@ export const AdminPage: React.FC = () => {
   const [healthLoading, setHealthLoading] = useState<boolean>(true);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [stats, setStats] = useState<AdminStatsResponse | null>(null);
+
+  // Account Requests state
+  const [accountRequests, setAccountRequests] = useState<AccountRequest[]>([]);
+  const [accountRequestsLoading, setAccountRequestsLoading] = useState<boolean>(true);
+  const [accountRequestsError, setAccountRequestsError] = useState<string | null>(null);
+  const [accountRequestsSuccess, setAccountRequestsSuccess] = useState<string | null>(null);
+  const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+  const [adminNotesByRequestId, setAdminNotesByRequestId] = useState<Record<string, string>>({});
+  const [requestFilter, setRequestFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+
+  const pendingRequestsCount = accountRequests.filter((r) => r.status === 'PENDING').length;
+  const approvedRequestsCount = accountRequests.filter((r) => r.status === 'APPROVED').length;
+  const rejectedRequestsCount = accountRequests.filter((r) => r.status === 'REJECTED').length;
+
+  const filteredRequests = accountRequests.filter((req) => {
+    if (requestFilter === 'PENDING') return req.status === 'PENDING';
+    if (requestFilter === 'APPROVED') return req.status === 'APPROVED';
+    if (requestFilter === 'REJECTED') return req.status === 'REJECTED';
+    return true;
+  });
 
   // Accounts state
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
@@ -171,6 +193,20 @@ export const AdminPage: React.FC = () => {
     }
   }, []);
 
+  const fetchAccountRequests = useCallback(async () => {
+    try {
+      setAccountRequestsLoading(true);
+      setAccountRequestsError(null);
+      const data = await accountRequestsApi.getRequests();
+      setAccountRequests(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to retrieve account requests.';
+      setAccountRequestsError(msg);
+    } finally {
+      setAccountRequestsLoading(false);
+    }
+  }, []);
+
   const fetchTransactions = useCallback(async (accId?: string) => {
     try {
       setTransactionsLoading(true);
@@ -236,6 +272,50 @@ export const AdminPage: React.FC = () => {
       setCreateAccountError(msg);
     } finally {
       setCreatingAccount(false);
+    }
+  };
+
+  const handleApproveRequest = async (req: AccountRequest) => {
+    try {
+      setReviewingRequestId(req.id);
+      setAccountRequestsError(null);
+      setAccountRequestsSuccess(null);
+      const notes = adminNotesByRequestId[req.id] || '';
+      const res = await accountRequestsApi.approveRequest(req.id, notes);
+      setAccountRequestsSuccess(`Request accepted successfully. New account ${res.accountNumber} opened for ${res.userEmail}.`);
+      setAdminNotesByRequestId((prev) => {
+        const copy = { ...prev };
+        delete copy[req.id];
+        return copy;
+      });
+      await Promise.all([fetchAccountRequests(), fetchAccounts(), fetchStats(), fetchUsers()]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to approve account request.';
+      setAccountRequestsError(msg);
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
+  const handleRejectRequest = async (req: AccountRequest) => {
+    try {
+      setReviewingRequestId(req.id);
+      setAccountRequestsError(null);
+      setAccountRequestsSuccess(null);
+      const notes = adminNotesByRequestId[req.id] || '';
+      await accountRequestsApi.rejectRequest(req.id, notes);
+      setAccountRequestsSuccess(`Request for ${req.userEmail} has been rejected.`);
+      setAdminNotesByRequestId((prev) => {
+        const copy = { ...prev };
+        delete copy[req.id];
+        return copy;
+      });
+      await fetchAccountRequests();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to reject account request.';
+      setAccountRequestsError(msg);
+    } finally {
+      setReviewingRequestId(null);
     }
   };
 
@@ -516,6 +596,7 @@ export const AdminPage: React.FC = () => {
           {[
             { id: 'overview', label: 'Overview & Diagnostics' },
             { id: 'accounts', label: `Accounts Directory (${accounts.length})` },
+            { id: 'requests', label: pendingRequestsCount > 0 ? `Account Requests (${pendingRequestsCount} Pending)` : `Account Requests (${accountRequests.length})` },
             { id: 'users', label: `Users & Roles (${users.length})` },
             { id: 'transactions', label: `Bank-Wide Transactions (${transactions.length})` },
             { id: 'deposit', label: 'Administrative Credit / Deposit' },
@@ -1126,6 +1207,185 @@ export const AdminPage: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+
+        {/* TAB: ACCOUNT OPENING REQUESTS */}
+        {activeTab === 'requests' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: 0 }}>
+                  Customer Account Opening Requests
+                </h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: '2px 0 0 0' }}>
+                  Review, approve, or reject customer requests to open new bank accounts.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setRequestFilter(filter)}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '12px',
+                      fontWeight: requestFilter === filter ? 600 : 500,
+                      borderRadius: '6px',
+                      border: '1px solid',
+                      borderColor: requestFilter === filter ? '#0D6E64' : '#D1D5DB',
+                      backgroundColor: requestFilter === filter ? '#E6F4F2' : '#FFFFFF',
+                      color: requestFilter === filter ? '#0D6E64' : '#374151',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {filter === 'ALL'
+                      ? `All (${accountRequests.length})`
+                      : filter === 'PENDING'
+                      ? `Pending (${pendingRequestsCount})`
+                      : filter === 'APPROVED'
+                      ? `Approved (${approvedRequestsCount})`
+                      : `Rejected (${rejectedRequestsCount})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {accountRequestsSuccess && (
+              <div className="alert alert-success" role="alert" style={{ marginBottom: '16px' }}>
+                {accountRequestsSuccess}
+              </div>
+            )}
+
+            {accountRequestsError && (
+              <div className="alert alert-danger" role="alert" style={{ marginBottom: '16px' }}>
+                {accountRequestsError}
+              </div>
+            )}
+
+            {accountRequestsLoading ? (
+              <div style={{ padding: '24px 0', color: '#6B7280', textAlign: 'center' }}>
+                Loading account requests...
+              </div>
+            ) : filteredRequests.length === 0 ? (
+              <div style={{ padding: '32px 0', color: '#6B7280', textAlign: 'center' }}>
+                No account requests found for this filter.
+              </div>
+            ) : (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Customer Email</th>
+                      <th>Customer ID</th>
+                      <th>Currency</th>
+                      <th>Date Requested</th>
+                      <th>Status</th>
+                      <th>Admin Review Notes</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRequests.map((req) => {
+                      const isPending = req.status === 'PENDING';
+                      const isApproved = req.status === 'APPROVED';
+                                            const isReviewing = reviewingRequestId === req.id;
+
+                      return (
+                        <tr key={req.id}>
+                          <td style={{ fontWeight: 500, color: '#111827' }}>
+                            {req.userEmail}
+                          </td>
+                          <td style={{ fontSize: '12px', fontFamily: 'monospace', color: '#4B5563' }}>
+                            {req.userId}
+                          </td>
+                          <td>
+                            <span className="badge badge-gray">{req.currency}</span>
+                          </td>
+                          <td style={{ fontSize: '12px', color: '#6B7280' }}>
+                            {formatDate(req.createdAt)}
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                padding: '2px 8px',
+                                borderRadius: '9999px',
+                                backgroundColor: isPending ? '#FEF3C7' : isApproved ? '#DCFCE7' : '#FEE2E2',
+                                color: isPending ? '#92400E' : isApproved ? '#15803D' : '#991B1B',
+                                border: isPending ? '1px solid #FCD34D' : isApproved ? '1px solid #BBF7D0' : '1px solid #FECACA',
+                              }}
+                            >
+                              {req.status}
+                            </span>
+                            {isApproved && req.accountNumber && (
+                              <div style={{ fontSize: '11px', color: '#0D6E64', marginTop: '2px', fontWeight: 600 }}>
+                                Acc: {req.accountNumber}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            {isPending ? (
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Optional review / verification note"
+                                value={adminNotesByRequestId[req.id] || ''}
+                                onChange={(e) =>
+                                  setAdminNotesByRequestId({
+                                    ...adminNotesByRequestId,
+                                    [req.id]: e.target.value,
+                                  })
+                                }
+                                style={{ fontSize: '12px', padding: '4px 8px', minWidth: '180px' }}
+                              />
+                            ) : (
+                              <div style={{ fontSize: '12px', color: '#4B5563' }}>
+                                {req.adminNotes || <span style={{ color: '#9CA3AF' }}>No notes</span>}
+                                {req.reviewedBy && (
+                                  <div style={{ fontSize: '10px', color: '#9CA3AF' }}>
+                                    By: {req.reviewedBy}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {isPending ? (
+                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  className="btn-primary"
+                                  style={{ padding: '4px 10px', fontSize: '12px' }}
+                                  disabled={isReviewing}
+                                  onClick={() => handleApproveRequest(req)}
+                                >
+                                  {isReviewing ? 'Processing...' : 'Accept & Open'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-outline"
+                                  style={{ padding: '4px 10px', fontSize: '12px', color: '#DC2626', borderColor: '#FECACA' }}
+                                  disabled={isReviewing}
+                                  onClick={() => handleRejectRequest(req)}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#9CA3AF' }}>Reviewed</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

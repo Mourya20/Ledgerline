@@ -105,6 +105,7 @@ public class Phase2FinancialEngineIntegrationTests {
     private void cleanTestData() {
         TestDatabaseGuard.assertTestDatabase(jdbcTemplate);
         jdbcTemplate.execute("TRUNCATE TABLE audit_logs, ledger_entries, ledger_transactions, accounts, users CASCADE");
+        seedSystemCashVault();
     }
 
     private void seedSystemCashVault() {

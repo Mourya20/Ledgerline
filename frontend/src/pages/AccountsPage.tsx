@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { accountsApi } from '../api/accounts';
-import type { AccountResponse } from '../api/types';
+import { accountRequestsApi } from '../api/accountRequests';
+import type { AccountResponse, AccountRequest } from '../api/types';
 import { formatCurrency, maskAccountNumber, formatDate } from '../utils/formatters';
 import { ApiException } from '../api/client';
 
@@ -11,11 +12,14 @@ export const AccountsPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
+  const [accountRequests, setAccountRequests] = useState<AccountRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Account Opening Request Modal state
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
 
   // Account closure / deletion state
   const [accountToClose, setAccountToClose] = useState<AccountResponse | null>(null);
@@ -25,12 +29,16 @@ export const AccountsPage: React.FC = () => {
   // Filter state
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
 
-  const fetchAccounts = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await accountsApi.getAccounts();
-      setAccounts(data);
+      const [accountsData, requestsData] = await Promise.all([
+        accountsApi.getAccounts(),
+        accountRequestsApi.getRequests(),
+      ]);
+      setAccounts(accountsData);
+      setAccountRequests(requestsData);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load accounts';
       setError(msg);
@@ -40,26 +48,31 @@ export const AccountsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchAccounts();
+    fetchData();
   }, []);
 
-  const handleCreateAccount = async () => {
+  const pendingRequests = accountRequests.filter((r) => r.status === 'PENDING');
+  const hasPendingRequest = pendingRequests.length > 0;
+
+  const handleRequestAccount = async () => {
     try {
-      setIsCreatingAccount(true);
+      setIsSubmittingRequest(true);
       setError(null);
       setSuccessMessage(null);
-      const newAcc = await accountsApi.createAccount({ currency: 'INR' });
-      setShowCreateModal(false);
-      setSuccessMessage(`New account ${maskAccountNumber(newAcc.accountNumber)} created successfully.`);
-      await fetchAccounts();
+      await accountRequestsApi.createRequest('INR');
+      setShowRequestModal(false);
+      setSuccessMessage(
+        'Account opening request submitted successfully. An administrator must approve your request before the account is activated.'
+      );
+      await fetchData();
     } catch (err: unknown) {
       if (err instanceof ApiException) {
-        setError(err.message || 'Failed to create account.');
+        setError(err.message || 'Failed to submit account request.');
       } else {
-        setError('Network error while creating account.');
+        setError('Network error while submitting account request.');
       }
     } finally {
-      setIsCreatingAccount(false);
+      setIsSubmittingRequest(false);
     }
   };
 
@@ -75,7 +88,7 @@ export const AccountsPage: React.FC = () => {
       const closed = await accountsApi.closeAccount(accountToClose.id);
       setAccountToClose(null);
       setSuccessMessage(`Account ${maskAccountNumber(closed.accountNumber)} has been closed successfully.`);
-      await fetchAccounts();
+      await fetchData();
     } catch (err: unknown) {
       const msg = err instanceof ApiException
         ? err.message || 'Failed to close account.'
@@ -120,7 +133,8 @@ export const AccountsPage: React.FC = () => {
           className="btn-primary"
           onClick={() => {
             setError(null);
-            setShowCreateModal(true);
+            setCloseError(null);
+            setShowRequestModal(true);
           }}
         >
           + Open new account
@@ -136,6 +150,56 @@ export const AccountsPage: React.FC = () => {
       {error && (
         <div className="alert alert-danger" role="alert" style={{ marginBottom: '20px' }}>
           {error}
+        </div>
+      )}
+
+      {/* Pending Account Opening Requests Section */}
+      {pendingRequests.length > 0 && (
+        <div style={{ marginBottom: '28px' }}>
+          {pendingRequests.map((req) => (
+            <div
+              key={req.id}
+              className="card"
+              style={{
+                backgroundColor: '#FFFBEB',
+                border: '1px solid #FCD34D',
+                marginBottom: '12px',
+                padding: '16px 20px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '3px 10px',
+                      borderRadius: '9999px',
+                      backgroundColor: '#FEF3C7',
+                      color: '#B45309',
+                      border: '1px solid #FDE68A'
+                    }}
+                  >
+                    Awaiting Administrator Approval
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#92400E' }}>
+                    Submitted {formatDate(req.createdAt)}
+                  </span>
+                </div>
+                <div style={{ fontSize: '14px', color: '#78350F', lineHeight: 1.4 }}>
+                  Your request to open a new <strong>{req.currency}</strong> bank account is under administrator review. Once accepted, your new account will be created and displayed below automatically.
+                </div>
+              </div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#92400E' }}>
+                Status: Pending Approval
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -310,9 +374,9 @@ export const AccountsPage: React.FC = () => {
                             : 'Account balance must be ₹0.00 to close. Please transfer or withdraw all funds first.'
                         }
                         onClick={() => {
+                          setError(null);
+                          setCloseError(null);
                           if (isZeroBalance) {
-                            setError(null);
-                            setCloseError(null);
                             setAccountToClose(account);
                           } else {
                             setError(
@@ -342,9 +406,13 @@ export const AccountsPage: React.FC = () => {
                 {statusFilter !== 'CLOSED' && (
                   <button
                     className="btn-primary"
-                    onClick={() => setShowCreateModal(true)}
+                    onClick={() => {
+                      setError(null);
+                      setCloseError(null);
+                      setShowRequestModal(true);
+                    }}
                   >
-                    Open your first account
+                    Request your first account
                   </button>
                 )}
               </div>
@@ -392,8 +460,8 @@ export const AccountsPage: React.FC = () => {
         </>
       )}
 
-      {/* Account Creation Modal */}
-      {showCreateModal && (
+      {/* Account Opening Request Modal */}
+      {showRequestModal && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -407,29 +475,58 @@ export const AccountsPage: React.FC = () => {
           padding: '20px',
           zIndex: 1000
         }}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '28px' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '28px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>
-              Open New Customer Account
+              Request New Bank Account
             </h3>
-            <p style={{ fontSize: '14px', color: '#4B5563', marginBottom: '20px', lineHeight: 1.5 }}>
-              This will create a new standard customer account denominated in <strong>INR (₹)</strong> with an initial zero balance.
+            <p style={{ fontSize: '14px', color: '#4B5563', marginBottom: '16px', lineHeight: 1.5 }}>
+              Submit a request to open a new Vaultora bank account denominated in <strong>INR (₹)</strong>.
             </p>
+
+            <div style={{
+              backgroundColor: '#F0FDF4',
+              border: '1px solid #BBF7D0',
+              borderRadius: '6px',
+              padding: '12px 14px',
+              marginBottom: '20px',
+              fontSize: '13px',
+              color: '#166534',
+              lineHeight: 1.4
+            }}>
+              <strong>Administrator Approval Required:</strong> In accordance with bank governance, an administrator must review and accept your account opening request before your new account is created.
+            </div>
+
+            {hasPendingRequest && (
+              <div style={{
+                backgroundColor: '#FEF3C7',
+                border: '1px solid #FCD34D',
+                borderRadius: '6px',
+                padding: '12px 14px',
+                marginBottom: '20px',
+                fontSize: '13px',
+                color: '#92400E',
+                lineHeight: 1.4
+              }}>
+                You currently already have an account opening request pending administrator review. Please wait for your pending request to be processed.
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
                 className="btn-outline"
-                onClick={() => setShowCreateModal(false)}
-                disabled={isCreatingAccount}
+                onClick={() => setShowRequestModal(false)}
+                disabled={isSubmittingRequest}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 className="btn-primary"
-                onClick={handleCreateAccount}
-                disabled={isCreatingAccount}
+                onClick={handleRequestAccount}
+                disabled={isSubmittingRequest || hasPendingRequest}
               >
-                {isCreatingAccount ? 'Creating...' : 'Confirm & Open'}
+                {isSubmittingRequest ? 'Submitting Request...' : 'Submit Request for Approval'}
               </button>
             </div>
           </div>
