@@ -795,3 +795,40 @@ Strict constraints were enforced:
 - Entire backend test suite: 118 tests passed, 0 failures, 0 errors.
 - Frontend test suite: 32 tests passed, 0 failures.
 - Frontend production bundle build: `tsc -b && vite build` built in 496ms with 0 errors.
+
+
+---
+
+## 18. Phase 5 — Dynamic Multi-Role User Onboarding, Administrative Password Assignment, & Account Closure UX Resilience
+
+### Requirements Summary
+1. **Diagnosis & Resolution of "An internal error occurred" in Account Management**:
+   - Diagnosed root cause of the error banner observed during account closure: when calling \`DELETE /api/v1/accounts/{accountId}\`, an unhandled \`HttpRequestMethodNotSupportedException\` on earlier server instances previously fell through to generic 500 error handling, while the UI preserved stale page-level errors without clearing them on modal interactions.
+   - Handled \`HttpRequestMethodNotSupportedException\` cleanly with HTTP 405 Method Not Allowed in \`ApiExceptionHandler.java\`.
+   - Enhanced \`AccountsPage.tsx\` error management:
+     - Clears stale page errors when opening the creation modal or closure confirmation modal.
+     - Routes account closure errors exclusively into the modal's contextual alert (\`closeError\`) rather than corrupting the background page banner.
+     - Clears errors upon cancelling the modal.
+2. **Administrative Dynamic User Onboarding (CUSTOMER or AUDITOR Role with Custom ID & Initial Password)**:
+   - Administrators can open a bank account for an existing or newly provisioned user with explicit role selection (\`CUSTOMER\` vs \`AUDITOR\`).
+   - Dynamic onboarding accepts an explicit UUID (\`customerId\`), \`customerEmail\`, \`role\`, and optional initial \`customerPassword\` (validated to 12+ chars, max 72 UTF-8 bytes).
+   - Prevents privilege escalation to \`ADMIN\` role (HTTP 400 Bad Request: "Newly onboarded users can only be assigned CUSTOMER or AUDITOR role").
+   - Implemented PostgreSQL \`SECURITY DEFINER\` stored procedure \`admin_onboard_user\` in Flyway migration \`V10__allow_admin_password_assignment_and_auditor_provisioning.sql\`, preserving \`Phase2FinancialEngineIntegrationTests\` database catalog invariants.
+3. **Administrative User Password Assignment & Reset**:
+   - Added endpoint \`POST /api/v1/admin/users/{userId}/password\` for administrators to assign or reset passwords for users with \`CUSTOMER\` or \`AUDITOR\` roles.
+   - Disallows assigning or resetting passwords for \`ADMIN\` users (HTTP 400 Bad Request: "Administrators can only assign passwords for CUSTOMER and AUDITOR users").
+   - Enforces password security: minimum 12 characters, maximum 72 UTF-8 bytes, BCrypt encoding.
+   - Implemented PostgreSQL \`SECURITY DEFINER\` stored procedure \`admin_assign_user_password\` in migration \`V10\`, maintaining strict runtime role column-level update boundaries.
+   - Frontend UI: Added 1-click "Assign Password" action in Admin Users & Roles Directory with modal confirmation and real-time validation.
+   - Emits immutable audit log events: \`ADMIN_USER_PASSWORD_ASSIGNED\` and \`CUSTOMER_ONBOARDED_BY_ADMIN\` / \`AUDITOR_ONBOARDED_BY_ADMIN\`.
+
+### Verification Results
+- **Backend Test Suite**: **128 tests run, 128 passed, 0 failures, 0 errors** (\`BUILD SUCCESS\`).
+  - \`AccountManagementIntegrationTests\`: 17 tests passed (100%).
+  - \`Phase2FinancialEngineIntegrationTests\`: 56 tests passed (100%), including all 22 Security & Authorization catalog tests.
+  - \`Phase1IntegrationTests\`: 31 tests passed (100%).
+  - \`RuntimeRoleApplicationIntegrationTest\`: 8 tests passed (100%).
+  - Rate Limiter and UTF-8 Byte Validator tests: 15 tests passed (100%).
+  - \`VaultoraApplicationTests\`: 1 test passed (100%).
+- **Frontend Test Suite**: **32 tests passed (100%)** across 6 test suites.
+- **Frontend Production Bundle Build**: \`tsc -b && vite build\` built cleanly in 488ms with 0 errors.

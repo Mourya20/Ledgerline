@@ -1,6 +1,9 @@
 package com.vaultora.admin;
 
 import java.util.List;
+import java.util.Map;
+import org.springframework.web.bind.annotation.PostMapping;
+import com.vaultora.admin.dto.AssignPasswordRequest;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -75,6 +78,17 @@ public class AdminController {
         UserEntity actor = verifyAdmin(authentication);
         AccountEntity updated = adminService.updateAccountStatus(accountId, request.status(), actor);
         return ResponseEntity.ok(AccountResponse.fromEntity(updated));
+    }
+
+    
+    @PostMapping("/users/{userId}/password")
+    public ResponseEntity<Map<String, String>> assignUserPassword(
+            Authentication authentication,
+            @PathVariable UUID userId,
+            @Valid @RequestBody AssignPasswordRequest request) {
+        UserEntity actor = verifyAdmin(authentication);
+        adminService.assignUserPassword(userId, request.password(), actor);
+        return ResponseEntity.ok(Map.of("message", "Password assigned successfully"));
     }
 
     private UserEntity verifyAdmin(Authentication authentication) {

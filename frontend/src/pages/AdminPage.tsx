@@ -63,6 +63,7 @@ export const AdminPage: React.FC = () => {
 
   // Account creation form state
   const [targetEmail, setTargetEmail] = useState<string>('');
+  const [targetRole, setTargetRole] = useState<'CUSTOMER' | 'AUDITOR'>('CUSTOMER');
   const [targetCustomerId, setTargetCustomerId] = useState<string>('');
   const [targetCustomerPassword, setTargetCustomerPassword] = useState<string>('');
   const [showAdvancedOptions, setShowAdvancedOptions] = useState<boolean>(false);
@@ -77,6 +78,11 @@ export const AdminPage: React.FC = () => {
   const [usersError, setUsersError] = useState<string | null>(null);
   const [searchUserQuery, setSearchUserQuery] = useState<string>('');
   const [statusUpdatingUserId, setStatusUpdatingUserId] = useState<string | null>(null);
+  const [passwordModalUser, setPasswordModalUser] = useState<UserSummaryResponse | null>(null);
+  const [newPassword, setNewPassword] = useState<string>('');
+  const [assigningPassword, setAssigningPassword] = useState<boolean>(false);
+  const [assignPasswordError, setAssignPasswordError] = useState<string | null>(null);
+  const [assignPasswordSuccess, setAssignPasswordSuccess] = useState<string | null>(null);
 
   // Transactions state
   const [transactions, setTransactions] = useState<TransactionResponse[]>([]);
@@ -216,6 +222,7 @@ export const AdminPage: React.FC = () => {
         customerEmail: email || undefined,
         customerId: customerId || (email ? (users.find(u => u.email.toLowerCase() === email.toLowerCase())?.id || crypto.randomUUID()) : undefined),
         customerPassword: targetCustomerPassword.trim() || undefined,
+        role: targetRole,
       });
       setCreateAccountSuccess(created);
       setTargetEmail('');
@@ -229,6 +236,28 @@ export const AdminPage: React.FC = () => {
       setCreateAccountError(msg);
     } finally {
       setCreatingAccount(false);
+    }
+  };
+
+  // Password Assignment Handler
+  const handleAssignPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordModalUser) return;
+    if (!newPassword || newPassword.length < 12) {
+      setAssignPasswordError('Password must be at least 12 characters.');
+      return;
+    }
+    try {
+      setAssigningPassword(true);
+      setAssignPasswordError(null);
+      await adminApi.assignUserPassword(passwordModalUser.id, newPassword);
+      setAssignPasswordSuccess(`Password successfully assigned for ${passwordModalUser.email} (${passwordModalUser.role}).`);
+      setPasswordModalUser(null);
+      setNewPassword('');
+    } catch (err: unknown) {
+      setAssignPasswordError(err instanceof Error ? err.message : 'Failed to assign password.');
+    } finally {
+      setAssigningPassword(false);
     }
   };
 
@@ -682,6 +711,33 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <form onSubmit={handleCreateAccount} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Role Assignment Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '18px', padding: '6px 12px', backgroundColor: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Account Owner Role:</span>
+                  <label style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: targetRole === 'CUSTOMER' ? '#0D6E64' : '#374151', fontWeight: targetRole === 'CUSTOMER' ? 600 : 400 }}>
+                    <input
+                      type="radio"
+                      name="targetRole"
+                      value="CUSTOMER"
+                      checked={targetRole === 'CUSTOMER'}
+                      onChange={() => setTargetRole('CUSTOMER')}
+                      disabled={creatingAccount}
+                    />
+                    Customer
+                  </label>
+                  <label style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: targetRole === 'AUDITOR' ? '#0D6E64' : '#374151', fontWeight: targetRole === 'AUDITOR' ? 600 : 400 }}>
+                    <input
+                      type="radio"
+                      name="targetRole"
+                      value="AUDITOR"
+                      checked={targetRole === 'AUDITOR'}
+                      onChange={() => setTargetRole('AUDITOR')}
+                      disabled={creatingAccount}
+                    />
+                    Auditor
+                  </label>
+                </div>
+
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <input
                     type="email"
@@ -785,7 +841,7 @@ export const AdminPage: React.FC = () => {
                       <button
                         key={email}
                         type="button"
-                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); }}
+                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); setTargetRole('CUSTOMER'); }}
                         disabled={creatingAccount}
                         style={{
                           padding: '2px 8px',
@@ -806,7 +862,7 @@ export const AdminPage: React.FC = () => {
                       <button
                         key={email}
                         type="button"
-                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); }}
+                        onClick={() => { setTargetEmail(email); setTargetCustomerId(''); setTargetRole('CUSTOMER'); }}
                         disabled={creatingAccount}
                         style={{
                           padding: '2px 8px',
@@ -1076,6 +1132,11 @@ export const AdminPage: React.FC = () => {
         {/* TAB 3: USER & ROLE MANAGEMENT */}
         {activeTab === 'users' && (
           <div className="card">
+            {assignPasswordSuccess && (
+              <div className="alert alert-success" role="alert" style={{ marginBottom: '16px' }}>
+                {assignPasswordSuccess}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: 0 }}>
@@ -1234,7 +1295,31 @@ export const AdminPage: React.FC = () => {
                           </td>
                           <td style={{ padding: '10px 14px' }}>
                             {!isSelf && (
-                              <div>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {(u.role === 'CUSTOMER' || u.role === 'AUDITOR') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPasswordModalUser(u);
+                                      setNewPassword('');
+                                      setAssignPasswordError(null);
+                                      setAssignPasswordSuccess(null);
+                                    }}
+                                    style={{
+                                      padding: '3px 8px',
+                                      fontSize: '11px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #BAE6FD',
+                                      backgroundColor: '#F0F9FF',
+                                      color: '#0369A1',
+                                      cursor: 'pointer',
+                                      fontWeight: 500
+                                    }}
+                                    title="Assign / Reset Password for this user"
+                                  >
+                                    Assign Password
+                                  </button>
+                                )}
                                 {u.status === 'ACTIVE' ? (
                                   <button
                                     type="button"
@@ -1471,6 +1556,84 @@ export const AdminPage: React.FC = () => {
             </form>
           </div>
         )}
+        {/* Assign Password Modal */}
+        {passwordModalUser && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            zIndex: 1000
+          }}>
+            <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span className="badge badge-blue" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                  Admin Privilege
+                </span>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                  Assign User Password
+                </h3>
+              </div>
+              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
+                Assign or reset password for <strong>{passwordModalUser.email}</strong> ({passwordModalUser.role}).
+              </p>
+
+              {assignPasswordError && (
+                <div className="alert alert-danger" role="alert" style={{ marginBottom: '14px', fontSize: '12px' }}>
+                  {assignPasswordError}
+                </div>
+              )}
+
+              <form onSubmit={handleAssignPassword}>
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+                    New Password (min 12 characters, max 72 bytes)
+                  </label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    className="input-field"
+                    style={{ width: '100%' }}
+                    disabled={assigningPassword}
+                    required
+                    minLength={12}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setPasswordModalUser(null);
+                      setNewPassword('');
+                      setAssignPasswordError(null);
+                    }}
+                    disabled={assigningPassword}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={assigningPassword || newPassword.length < 12}
+                  >
+                    {assigningPassword ? 'Assigning...' : 'Confirm & Assign'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* CUSTOMER ACCOUNTS INSPECTOR MODAL */}
         {inspectedCustomer && (
           <div style={{

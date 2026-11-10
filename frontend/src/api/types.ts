@@ -85,6 +85,7 @@ export interface CreateAccountRequest {
   customerEmail?: string;
   customerId?: string;
   customerPassword?: string;
+  role?: 'CUSTOMER' | 'AUDITOR';
 }
 
 export interface LoginRequest {

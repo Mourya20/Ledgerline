@@ -358,6 +358,23 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
   - `backend/ledgerline/src/main/java/com/vaultora/admin/AdminController.java` (`getUserAccounts`)
 - **Verification**: `AccountManagementIntegrationTests.adminCanViewAccountsOfSpecificCustomer()`, `AccountManagementIntegrationTests.customerCannotAccessAdminUserAccountsEndpoint()`
 
+
+#### SEC-AUTHZ-008: Administrative Password Assignment & Dynamic Auditor Onboarding Privilege Escalation
+- **Category**: Authorization / Privilege Boundary
+- **Severity**: High (Unauthorized credential manipulation or administrative role fabrication)
+- **Attack Scenario**: An attacker attempts to exploit administrative password assignment (`POST /api/v1/admin/users/{userId}/password`) to reset another administrator's password, or attempts to provision a new user with `ADMIN` role via dynamic onboarding (`POST /api/v1/accounts`). Alternatively, an attacker executing raw SQL through the runtime identity attempts to update `password_hash` or insert `AUDITOR`/`ADMIN` records directly.
+- **Mitigation Strategy**:
+  1. Endpoint Role Guarding: `AdminService.assignUserPassword` strictly verifies that the target user role is either `CUSTOMER` or `AUDITOR`. Any attempt to assign passwords to an `ADMIN` user is rejected with HTTP 400 Bad Request.
+  2. Dynamic Onboarding Role Restrictions: `AccountController.createAccount` restricts newly onboarded users strictly to `CUSTOMER` or `AUDITOR`. Any attempt to specify `ADMIN` is rejected with HTTP 400 Bad Request.
+  3. Database Privilege Defenses: The runtime user (`ledgerline_runtime`) possesses NO table-level `UPDATE (password_hash)` grant and NO direct insertion privilege for non-customer roles, preserving `Phase2FinancialEngineIntegrationTests` security catalog invariants. Password resets and auditor onboardings are strictly mediated by PostgreSQL `SECURITY DEFINER` stored procedures (`admin_assign_user_password` and `admin_onboard_user`), executing server-side role validation before applying writes.
+  4. Immutable Audit Trail: Every administrative password assignment generates an immutable audit log record `ADMIN_USER_PASSWORD_ASSIGNED` with target user details.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/resources/db/migration/V10__allow_admin_password_assignment_and_auditor_provisioning.sql`
+  - `backend/ledgerline/src/main/java/com/vaultora/admin/AdminService.java` (`assignUserPassword`)
+  - `backend/ledgerline/src/main/java/com/vaultora/admin/AdminController.java` (`assignUserPassword`)
+  - `backend/ledgerline/src/main/java/com/vaultora/account/AccountController.java` (`createAccount`)
+- **Verification**: `AccountManagementIntegrationTests.adminCanAssignPasswordToCustomer()`, `AccountManagementIntegrationTests.adminCanAssignPasswordToAuditor()`, `AccountManagementIntegrationTests.adminCannotAssignPasswordToAdmin()`, `AccountManagementIntegrationTests.adminCanOpenAccountForNonExistingAuditorWithAssignedRole()`, `AccountManagementIntegrationTests.adminCannotAssignAdminRoleDuringOnboarding()`, `Phase2FinancialEngineIntegrationTests$SecurityAndAuthorizationTests.runtimeRoleColumnGrantsLimitUpdateStrictly()`
+
 ### Category C: Financial & Ledger Integrity (Highest Priority)
 
 #### SEC-FIN-001: Race Conditions & Concurrent Double-Spending
@@ -1040,6 +1057,7 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 | `SEC-PRIV-002` | Counterpart Privacy Leakage | Data Privacy | Medium | MITIGATED | Viewer-aware DTO masking (`****1234`, null UUIDs) | `transferResponseMasksCounterpartForSenderAndReceiver` |
 | `SEC-CFG-002` | Hardcoded Fallback Credentials | Configuration | High | MITIGATED | Removed fallback passwords, separate `APP_DB_*` and `FLYWAY_DB_*` | Verified runtime & migration startup |
 | `SEC-AUTHZ-007` | Unprivileged Customer Creation Escalation | Application | High | MITIGATED | Forced `CUSTOMER` role & BCrypt hash on dynamic admin customer onboarding | `adminCanOpenAccountForNonExistingCustomerWithAutoAssignedId` |
+| `SEC-AUTHZ-008` | Password Assignment & Auditor Provisioning Privilege Escalation | Authorization | High | MITIGATED | Security Definer Procedures, Strict Role Guarding, Non-Admin Boundary | `adminCanAssignPasswordToCustomer`, `adminCanOpenAccountForNonExistingAuditorWithAssignedRole` |
 
 ---
 

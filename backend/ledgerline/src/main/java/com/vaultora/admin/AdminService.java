@@ -1,10 +1,13 @@
 package com.vaultora.admin;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,16 +32,22 @@ public class AdminService {
     private final AccountRepository accountRepository;
     private final LedgerTransactionRepository ledgerTransactionRepository;
     private final AuditService auditService;
+    private final PasswordEncoder passwordEncoder;
+    private final JdbcTemplate jdbcTemplate;
 
     public AdminService(
             UserRepository userRepository,
             AccountRepository accountRepository,
             LedgerTransactionRepository ledgerTransactionRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            PasswordEncoder passwordEncoder,
+            JdbcTemplate jdbcTemplate) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.ledgerTransactionRepository = ledgerTransactionRepository;
         this.auditService = auditService;
+        this.passwordEncoder = passwordEncoder;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -129,6 +138,40 @@ public class AdminService {
         );
 
         return saved;
+    }
+
+    @Transactional
+    public void assignUserPassword(UUID targetUserId, String newPassword, UserEntity actor) {
+        UserEntity target = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + targetUserId));
+
+        if (target.getRole() != UserRole.CUSTOMER && target.getRole() != UserRole.AUDITOR) {
+            throw new IllegalArgumentException("Administrators can only assign passwords for CUSTOMER and AUDITOR users");
+        }
+
+        if (newPassword == null || newPassword.isBlank()) {
+            throw new IllegalArgumentException("Password cannot be blank");
+        }
+        if (newPassword.length() < 12) {
+            throw new IllegalArgumentException("Password must be at least 12 characters");
+        }
+        if (newPassword.getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new IllegalArgumentException("Password must not exceed 72 UTF-8 bytes");
+        }
+
+        String encoded = passwordEncoder.encode(newPassword.trim());
+        jdbcTemplate.update("CALL admin_assign_user_password(?, ?)", targetUserId, encoded);
+
+        auditService.recordEvent(
+                actor,
+                "ADMIN_USER_PASSWORD_ASSIGNED",
+                "USER",
+                target.getId(),
+                Map.of(
+                        "email", target.getEmail(),
+                        "role", target.getRole().name()
+                )
+        );
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,6 @@
 package com.vaultora.account;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -7,6 +8,7 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -37,16 +39,19 @@ public class AccountController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
+    private final JdbcTemplate jdbcTemplate;
 
     public AccountController(
             AccountService accountService,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
-            AuditService auditService) {
+            AuditService auditService,
+            JdbcTemplate jdbcTemplate) {
         this.accountService = accountService;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditService = auditService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @PostMapping
@@ -80,7 +85,7 @@ public class AccountController {
 
             if (userByEmail.isPresent()) {
                 targetUser = userByEmail.get();
-                if (reqCustomerId != null) {
+                if (reqCustomerId != null || req.role() == UserRole.AUDITOR) {
                     if (targetUser.getRole() != UserRole.CUSTOMER && targetUser.getRole() != UserRole.AUDITOR) {
                         throw new IllegalArgumentException("Accounts can only be assigned to users with CUSTOMER or AUDITOR role");
                     }
@@ -95,24 +100,37 @@ public class AccountController {
                     throw new IllegalArgumentException("Accounts can only be assigned to users with CUSTOMER or AUDITOR role");
                 }
             } else {
-                // Non-existing user: Admin provisions new customer with the assigned ID
+                // Non-existing user: Admin provisions new user with the assigned ID and selected role
                 if (reqCustomerId == null) {
-                    throw new IllegalArgumentException("Customer not found with email: " + email + ". Specify customerId to onboard a new customer.");
+                    throw new IllegalArgumentException("User not found with email: " + email + ". Specify customerId to onboard a new user.");
                 }
                 if (email == null) {
-                    throw new IllegalArgumentException("customerEmail is required when creating a new customer account");
+                    throw new IllegalArgumentException("customerEmail is required when creating a new account");
                 }
+
+                UserRole assignedRole = (req.role() != null) ? req.role() : UserRole.CUSTOMER;
+                if (assignedRole != UserRole.CUSTOMER && assignedRole != UserRole.AUDITOR) {
+                    throw new IllegalArgumentException("Newly onboarded users can only be assigned CUSTOMER or AUDITOR role");
+                }
+
                 String password = (req.customerPassword() != null && !req.customerPassword().isBlank())
                         ? req.customerPassword().trim()
                         : "Password123!";
+                if (password.length() < 12) {
+                    throw new IllegalArgumentException("Password must be at least 12 characters");
+                }
+                if (password.getBytes(StandardCharsets.UTF_8).length > 72) {
+                    throw new IllegalArgumentException("Password must not exceed 72 UTF-8 bytes");
+                }
                 String encodedPassword = passwordEncoder.encode(password);
 
-                UserEntity newCustomer = new UserEntity(reqCustomerId, email, encodedPassword, UserRole.CUSTOMER);
-                targetUser = userRepository.save(newCustomer);
+                jdbcTemplate.update("CALL admin_onboard_user(?, ?, ?, ?)", reqCustomerId, email, encodedPassword, assignedRole.name());
+                targetUser = userRepository.findById(reqCustomerId)
+                        .orElseThrow(() -> new IllegalStateException("Failed to find newly onboarded user: " + reqCustomerId));
 
                 auditService.recordEvent(
                         actor,
-                        "CUSTOMER_ONBOARDED_BY_ADMIN",
+                        assignedRole == UserRole.AUDITOR ? "AUDITOR_ONBOARDED_BY_ADMIN" : "CUSTOMER_ONBOARDED_BY_ADMIN",
                         "USER",
                         targetUser.getId(),
                         Map.of(

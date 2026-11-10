@@ -83,7 +83,6 @@ export const AccountsPage: React.FC = () => {
           ? err.message
           : 'Failed to close account.';
       setCloseError(msg);
-      setError(msg);
     } finally {
       setIsClosingAccount(false);
     }
@@ -119,7 +118,10 @@ export const AccountsPage: React.FC = () => {
         </div>
         <button
           className="btn-primary"
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => {
+            setError(null);
+            setShowCreateModal(true);
+          }}
         >
           + Open new account
         </button>
@@ -309,6 +311,7 @@ export const AccountsPage: React.FC = () => {
                         }
                         onClick={() => {
                           if (isZeroBalance) {
+                            setError(null);
                             setCloseError(null);
                             setAccountToClose(account);
                           } else {
@@ -498,6 +501,7 @@ export const AccountsPage: React.FC = () => {
                 onClick={() => {
                   setAccountToClose(null);
                   setCloseError(null);
+                  setError(null);
                 }}
                 disabled={isClosingAccount}
               >

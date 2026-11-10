@@ -2,6 +2,7 @@ package com.vaultora.account.dto;
 
 import java.util.UUID;
 
+import com.vaultora.domain.UserRole;
 import jakarta.validation.constraints.Pattern;
 
 public record CreateAccountRequest(
@@ -9,14 +10,19 @@ public record CreateAccountRequest(
     String currency,
     String customerEmail,
     UUID customerId,
-    String customerPassword
+    String customerPassword,
+    UserRole role
 ) {
     public CreateAccountRequest(String currency) {
-        this(currency, null, null, null);
+        this(currency, null, null, null, null);
     }
 
     public CreateAccountRequest(String currency, String customerEmail) {
-        this(currency, customerEmail, null, null);
+        this(currency, customerEmail, null, null, null);
+    }
+
+    public CreateAccountRequest(String currency, String customerEmail, UUID customerId, String customerPassword) {
+        this(currency, customerEmail, customerId, customerPassword, null);
     }
 
     public CreateAccountRequest {

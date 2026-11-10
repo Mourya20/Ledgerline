@@ -39,4 +39,10 @@ export const adminApi = {
       body: JSON.stringify({ status }),
     });
   },
+  assignUserPassword: async (userId: string, password: string): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>(`/api/v1/admin/users/${userId}/password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  },
 };

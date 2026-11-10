@@ -267,4 +267,124 @@ public class AccountManagementIntegrationTests {
                 .andExpect(jsonPath("$[0].ownerEmail").value(customer1.getEmail()))
                 .andExpect(jsonPath("$[0].ownerId").value(customer1.getId().toString()));
     }
+
+    @Test
+    @DisplayName("Admin can assign/reset password for an existing customer")
+    void adminCanAssignPasswordToCustomer() throws Exception {
+        MockHttpSession adminSession = createSession(admin);
+        String newPass = "UpdatedCustomerPass123!";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/admin/users/" + customer1.getId() + "/password")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"password\":\"%s\"}", newPass)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Password assigned successfully"));
+
+        // Verify customer can login with new password
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/login")
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"email\":\"%s\",\"password\":\"%s\"}", customer1.getEmail(), newPass)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(customer1.getEmail()));
+    }
+
+    @Test
+    @DisplayName("Admin can assign/reset password for an existing auditor")
+    void adminCanAssignPasswordToAuditor() throws Exception {
+        MockHttpSession adminSession = createSession(admin);
+        String newPass = "UpdatedAuditorPass123!";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/admin/users/" + auditor.getId() + "/password")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"password\":\"%s\"}", newPass)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Password assigned successfully"));
+
+        // Verify auditor can login with new password
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/login")
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"email\":\"%s\",\"password\":\"%s\"}", auditor.getEmail(), newPass)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(auditor.getEmail()));
+    }
+
+    @Test
+    @DisplayName("Admin cannot assign password to another ADMIN user")
+    void adminCannotAssignPasswordToAnotherAdmin() throws Exception {
+        MockHttpSession adminSession = createSession(admin);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/admin/users/" + admin.getId() + "/password")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"password\":\"AttemptAdminPass123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Administrators can only assign passwords for CUSTOMER and AUDITOR users")));
+    }
+
+    @Test
+    @DisplayName("Customer cannot access admin password assignment endpoint")
+    void customerCannotAssignPasswords() throws Exception {
+        MockHttpSession customerSession = createSession(customer1);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/admin/users/" + customer2.getId() + "/password")
+                .session(customerSession)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"password\":\"HackedPassword123!\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Admin can open account for non-existing user with explicitly assigned AUDITOR role")
+    void adminCanOpenAccountForNonExistingAuditorWithAssignedRole() throws Exception {
+        MockHttpSession session = createSession(admin);
+        UUID newAuditorId = UUID.randomUUID();
+        String newAuditorEmail = "new_live_auditor_" + System.nanoTime() + "@vaultora.com";
+        String initialPass = "AuditorInitialPass123!";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"currency\":\"INR\",\"customerEmail\":\"%s\",\"customerId\":\"%s\",\"customerPassword\":\"%s\",\"role\":\"AUDITOR\"}",
+                        newAuditorEmail, newAuditorId, initialPass)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerEmail").value(newAuditorEmail))
+                .andExpect(jsonPath("$.ownerId").value(newAuditorId.toString()));
+
+        UserEntity created = userRepository.findById(newAuditorId).orElseThrow();
+        assertEquals(UserRole.AUDITOR, created.getRole());
+
+        // Verify login works with initial password
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/login")
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"email\":\"%s\",\"password\":\"%s\"}", newAuditorEmail, initialPass)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("AUDITOR"));
+    }
+
+    @Test
+    @DisplayName("Admin cannot assign ADMIN role during dynamic onboarding")
+    void adminCannotAssignAdminRoleDuringOnboarding() throws Exception {
+        MockHttpSession session = createSession(admin);
+        UUID newId = UUID.randomUUID();
+        String newEmail = "attempt_admin_" + System.nanoTime() + "@vaultora.com";
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(String.format("{\"currency\":\"INR\",\"customerEmail\":\"%s\",\"customerId\":\"%s\",\"role\":\"ADMIN\"}",
+                        newEmail, newId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Newly onboarded users can only be assigned CUSTOMER or AUDITOR role")));
+    }
 }
