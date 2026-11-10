@@ -112,6 +112,12 @@ export interface CreateAccountRequest {
   role?: 'CUSTOMER' | 'AUDITOR';
 }
 
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface LoginRequest {
   email: string;
   password: string;

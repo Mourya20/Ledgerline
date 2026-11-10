@@ -1,5 +1,5 @@
 import { apiClient, clearCsrfToken, fetchCsrfToken } from './client';
-import type { LoginRequest, RegisterRequest, UserResponse } from './types';
+import type { LoginRequest, RegisterRequest, UserResponse, ChangePasswordRequest } from './types';
 
 export const authApi = {
   getCsrf: async () => {
@@ -23,6 +23,13 @@ export const authApi = {
   getMe: async (): Promise<UserResponse> => {
     return apiClient<UserResponse>('/api/v1/auth/me', {
       method: 'GET',
+    });
+  },
+
+  changePassword: async (data: ChangePasswordRequest): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>('/api/v1/auth/password', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 

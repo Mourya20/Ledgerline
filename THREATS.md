@@ -397,6 +397,29 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 - **Verification**: `AccountManagementIntegrationTests.customerCanSubmitAccountOpeningRequest()`, `AccountManagementIntegrationTests.customerCannotSubmitDuplicatePendingRequest()`, `AccountManagementIntegrationTests.auditorCanViewRequestsButCannotApprove()`, `AccountManagementIntegrationTests.adminCanApproveAccountRequest()`, `AccountManagementIntegrationTests.adminCanRejectAccountRequest()`
 - **Status**: MITIGATED
 
+#### SEC-AUTHZ-010: Self-Service Password Change Verification & Database Catalog Least-Privilege Protection
+- **Threat ID**: `SEC-AUTHZ-010`
+- **Name**: Unauthorized Password Tampering, Password Re-Use Vulnerabilities, and Database UPDATE Escalation
+- **Category**: Authorization / Privilege Boundary / Cryptography
+- **Severity**: High (Unauthorized account takeover, credential tampering, privilege escalation)
+- **Attack Scenario**: A malicious actor attempts to change another user's password without supplying their valid existing credential, re-uses identical weak passwords, or exploits standard Hibernate ORM dynamic entity mutation to trigger direct `UPDATE users SET password_hash` statements that violate database role least-privilege catalog constraints.
+- **Mitigation Strategy**:
+  1. Mandatory Current Password Verification: `AuthService.changePassword()` explicitly checks the raw `currentPassword` against the user's stored BCrypt password hash using `passwordEncoder.matches()`. Mismatched passwords abort immediately with HTTP 400 Bad Request.
+  2. Password Differentiation Enforcer: The endpoint enforces that `newPassword` cannot be identical to `currentPassword` (`passwordEncoder.matches(newPassword, currentPassword) == false`), preventing redundant or inadvertent credential reuse.
+  3. Strict Complexity Constraints: New passwords must be at least 12 characters and no more than 72 UTF-8 bytes (guaranteeing compatibility with BCrypt algorithm boundaries), enforced via `@Size(min = 12)` and `@MaxUtf8Bytes(max = 72)` validation on `ChangePasswordRequest`.
+  4. PostgreSQL SECURITY DEFINER Procedure: To preserve `Phase2FinancialEngineIntegrationTests` strict catalog invariant forbidding direct `UPDATE` privileges on `users` table for `ledgerline_runtime`, password updates are executed through procedure `change_user_password(UUID, VARCHAR)`. The procedure runs with `SECURITY DEFINER` and restricted `search_path = public, pg_temp`, granting controlled execution rights to `ledgerline_runtime`.
+  5. Universal Role Availability: The self-service password update functionality is available to all authenticated roles (`CUSTOMER`, `AUDITOR`, `ADMIN`) via `POST /api/v1/auth/password` and surfaced directly in the top navigation, user profile cards, and persistent sidebar controls.
+  6. Immutable Audit Trail: Every successful password modification records an immutable `USER_PASSWORD_CHANGED` audit record logging the user ID, email, role, and client IP.
+- **Implementation Evidence**:
+  - `backend/ledgerline/src/main/resources/db/migration/V12__user_password_change.sql`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/ChangePasswordRequest.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthService.java`
+  - `backend/ledgerline/src/main/java/com/vaultora/auth/AuthController.java`
+  - `frontend/src/components/ChangePasswordModal.tsx`
+  - `frontend/src/components/layout/AppLayout.tsx`
+- **Verification**: `AccountManagementIntegrationTests.customerCanChangePassword()`, `AccountManagementIntegrationTests.passwordChangeFailsWithWrongCurrentPassword()`, `AccountManagementIntegrationTests.passwordChangeFailsWhenSamePassword()`, `AccountManagementIntegrationTests.auditorAndAdminCanChangePassword()`
+- **Status**: MITIGATED
+
 ### Category C: Financial & Ledger Integrity (Highest Priority)
 
 #### SEC-FIN-001: Race Conditions & Concurrent Double-Spending
@@ -1080,6 +1103,8 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 | `SEC-CFG-002` | Hardcoded Fallback Credentials | Configuration | High | MITIGATED | Removed fallback passwords, separate `APP_DB_*` and `FLYWAY_DB_*` | Verified runtime & migration startup |
 | `SEC-AUTHZ-007` | Unprivileged Customer Creation Escalation | Application | High | MITIGATED | Forced `CUSTOMER` role & BCrypt hash on dynamic admin customer onboarding | `adminCanOpenAccountForNonExistingCustomerWithAutoAssignedId` |
 | `SEC-AUTHZ-008` | Password Assignment & Auditor Provisioning Privilege Escalation | Authorization | High | MITIGATED | Security Definer Procedures, Strict Role Guarding, Non-Admin Boundary | `adminCanAssignPasswordToCustomer`, `adminCanOpenAccountForNonExistingAuditorWithAssignedRole` |
+| `SEC-AUTHZ-009` | Account Opening Request Approval Bypass | Authorization | High | MITIGATED | Mandatory Admin Review Lifecycle, Single Pending Constraint, Database Procedure | `adminCanApproveAccountRequest`, `auditorCanViewRequestsButCannotApprove` |
+| `SEC-AUTHZ-010` | Unauthorized Password Mutation & Catalog Privilege Invariant | Authorization / Crypto | High | MITIGATED | Current Password Verification, Difference Check, SECURITY DEFINER `change_user_password` | `customerCanChangePassword`, `auditorAndAdminCanChangePassword` |
 
 ---
 

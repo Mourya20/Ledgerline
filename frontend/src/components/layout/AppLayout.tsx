@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { PortalSwitcher } from '../PortalSwitcher';
+import { ChangePasswordModal } from '../ChangePasswordModal';
 
 export const AppLayout: React.FC = () => {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
   const handleLogout = async () => {
     await logout();
@@ -96,6 +98,28 @@ export const AppLayout: React.FC = () => {
           )}
           <button
             type="button"
+            onClick={() => setPasswordModalOpen(true)}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              padding: '7px 12px',
+              fontSize: '13px',
+              color: '#374151',
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              marginBottom: '8px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>🔒</span> Change password
+          </button>
+          <button
+            type="button"
             onClick={handleLogout}
             className="sidebar-logout"
           >
@@ -108,6 +132,12 @@ export const AppLayout: React.FC = () => {
       <main className="main-content">
         <Outlet />
       </main>
+
+      {/* Persistent Change Password Modal accessible across all portals */}
+      <ChangePasswordModal
+        isOpen={passwordModalOpen}
+        onClose={() => setPasswordModalOpen(false)}
+      />
     </div>
   );
 };

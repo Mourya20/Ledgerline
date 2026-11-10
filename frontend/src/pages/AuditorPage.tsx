@@ -5,6 +5,7 @@ import { auditApi } from '../api/audit';
 import type { Page, AuditLogItem } from '../api/types';
 import { formatDate } from '../utils/formatters';
 import { PortalSwitcher } from '../components/PortalSwitcher';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 
 export const AuditorPage: React.FC = () => {
   const { user, logout } = useAuth();
@@ -15,6 +16,7 @@ export const AuditorPage: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(15);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState<AuditLogItem | null>(null);
 
   const fetchLogs = useCallback(async () => {
@@ -398,6 +400,7 @@ export const AuditorPage: React.FC = () => {
           </div>
         </div>
       )}
+          <ChangePasswordModal isOpen={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
     </div>
   );
 };

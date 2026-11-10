@@ -18,6 +18,7 @@ import type {
 } from '../api/types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { PortalSwitcher } from '../components/PortalSwitcher';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 
 const DEMO_CUSTOMERS = [
   'customer1@ledgerline.com',
@@ -101,6 +102,7 @@ export const AdminPage: React.FC = () => {
   const [searchUserQuery, setSearchUserQuery] = useState<string>('');
   const [statusUpdatingUserId, setStatusUpdatingUserId] = useState<string | null>(null);
   const [passwordModalUser, setPasswordModalUser] = useState<UserSummaryResponse | null>(null);
+  const [adminOwnPasswordModalOpen, setAdminOwnPasswordModalOpen] = useState<boolean>(false);
   const [newPassword, setNewPassword] = useState<string>('');
   const [assigningPassword, setAssigningPassword] = useState<boolean>(false);
   const [assignPasswordError, setAssignPasswordError] = useState<string | null>(null);
@@ -232,6 +234,22 @@ export const AdminPage: React.FC = () => {
     fetchUsers();
     fetchTransactions();
   }, [fetchHealth, fetchStats, fetchAccounts, fetchUsers, fetchTransactions]);
+
+
+  // Automatically refresh requests when switching to requests tab
+  useEffect(() => {
+    if (activeTab === 'requests') {
+      fetchAccountRequests();
+    }
+  }, [activeTab, fetchAccountRequests]);
+
+  // Periodic polling for incoming account requests
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchAccountRequests();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [fetchAccountRequests]);
 
   const handleLogout = async () => {
     await logout();
@@ -819,7 +837,25 @@ export const AdminPage: React.FC = () => {
                   </label>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => fetchAccountRequests()}
+                  disabled={accountRequestsLoading}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: '#0D6E64',
+                    borderColor: '#0D6E64'
+                  }}
+                  title="Refresh account requests"
+                >
+                  ↻ Refresh
+                </button>
                   <input
                     type="email"
                     list={customerListId}
@@ -2142,6 +2178,7 @@ export const AdminPage: React.FC = () => {
             </div>
           </div>
         )}
+            <ChangePasswordModal isOpen={adminOwnPasswordModalOpen} onClose={() => setAdminOwnPasswordModalOpen(false)} />
       </main>
     </div>
   );

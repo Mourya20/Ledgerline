@@ -887,3 +887,45 @@ Strict constraints were enforced:
   - `VaultoraApplicationTests`: 1 test passed (100%).
 - **Frontend Test Suite**: **36 tests passed (100%)** across 7 test files.
 - **Frontend Production Bundle Build**: `tsc -b && vite build` built cleanly with 0 errors.
+
+---
+
+## 20. 2026-11-10 - Self-Service User Password Change & Real-Time Admin Account Requests Synchronization
+
+### Requirements Summary
+1. **Admin Account Requests Real-Time Synchronization & Bug Resolution**:
+   - Resolved issue where pending customer account requests (such as customer6's request) did not appear in the Admin Portal.
+   - Identified root cause in `AdminPage.tsx`: `fetchAccountRequests()` was missing from the initial component mount `useEffect` and was not triggered when switching to the "Account Requests" tab.
+   - Enhanced `AdminPage.tsx` with:
+     - Immediate data fetching on component mount (`fetchAccountRequests()` called alongside initial metrics).
+     - Reactive tab switching: Switching to the `requests` tab automatically triggers `fetchAccountRequests()`.
+     - 10-second background polling interval while on the `requests` tab for real-time notifications of incoming requests.
+     - An explicit manual "↻ Refresh Requests" button with loading indicator in the tab toolbar.
+2. **Self-Service Password Change for All Users ("from current to new")**:
+   - Universal capability allowing any authenticated user (`CUSTOMER`, `AUDITOR`, `ADMIN`) to change their password securely.
+   - Enforces supplying `currentPassword` and validates against the user's existing BCrypt hash.
+   - Rejects password change if `newPassword` matches `currentPassword`.
+   - Enforces password complexity (minimum 12 characters, maximum 72 UTF-8 bytes).
+   - Preserves PostgreSQL least-privilege catalog invariants: `ledgerline_runtime` has no direct `UPDATE` privilege on `users`; password mutation is orchestrated via Flyway `V12__user_password_change.sql` using PostgreSQL `SECURITY DEFINER` procedure `change_user_password(UUID, VARCHAR)`.
+   - Emits immutable audit log `USER_PASSWORD_CHANGED` with actor details, role, and IP address.
+3. **Frontend UI Integration**:
+   - Created reusable modal component `ChangePasswordModal.tsx` with clear complexity feedback, current/new/confirm fields, and instant validation.
+   - Embedded a persistent "Change password" button in the global sidebar footer (`AppLayout.tsx`), accessible to all users across any portal.
+   - Added dedicated "Change Password" buttons in `AccountsPage.tsx` (Customer Profile), `AdminPage.tsx` (Admin Header), and `AuditorPage.tsx` (Auditor Header).
+   - Added frontend API client method `changePassword()` in `frontend/src/api/auth.ts` and automated unit tests in `auth.test.ts`.
+
+### Verification Results
+- **Backend Test Suite**: **138 tests run, 138 passed, 0 failures, 0 errors** (`BUILD SUCCESS`).
+  - Added 4 integration tests in `AccountManagementIntegrationTests`:
+    - `customerCanChangePassword`: verifies successful password change and subsequent re-authentication with the new password.
+    - `passwordChangeFailsWithWrongCurrentPassword`: rejects invalid existing password with 400 Bad Request.
+    - `passwordChangeFailsWhenSamePassword`: rejects identical new password with 400 Bad Request.
+    - `auditorAndAdminCanChangePassword`: verifies password change capability across all non-customer administrative roles.
+  - All 56 `Phase2FinancialEngineIntegrationTests` passed (including all 22 database least-privilege catalog tests).
+  - All 31 `Phase1IntegrationTests` passed.
+  - All 8 `RuntimeRoleApplicationIntegrationTest` tests passed.
+- **Frontend Test Suite**: **37 tests passed (100%)** across 8 test files (`vitest run`).
+- **Frontend Production Bundle Build**: `tsc -b && vite build` built cleanly in 465ms with 0 errors.
+- **Live End-to-End Verification**:
+  - Live Admin API verified: customer6's request (`90f1fc34-a9c5-42b7-8081-3c3e7e96409c`, `PENDING`) confirmed visible and retrievable via authenticated session.
+  - Live Password Change API verified: successfully executed password modification, verified authentication under the new credential, and restored credential.

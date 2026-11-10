@@ -572,4 +572,84 @@ public class AccountManagementIntegrationTests {
                 .andExpect(jsonPath("$.reviewedBy").value(admin.getEmail()))
                 .andExpect(jsonPath("$.accountNumber").doesNotExist());
     }
+    @Test
+    @DisplayName("Customer can change password with correct current password")
+    void customerCanChangePassword() throws Exception {
+        UserEntity user = createOrGetUser("pwd_cust_" + System.nanoTime() + "@vaultora.com", UserRole.CUSTOMER);
+        MockHttpSession session = createSession(user);
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"ValidPass123!\",\"newPassword\":\"BrandNewPass456!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Password changed successfully"));
+
+        // Verify login succeeds with new password
+        mockMvc.perform(post("/api/v1/auth/login")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + user.getEmail() + "\",\"password\":\"BrandNewPass456!\"}"))
+                .andExpect(status().isOk());
+
+        // Verify login fails with old password
+        mockMvc.perform(post("/api/v1/auth/login")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + user.getEmail() + "\",\"password\":\"ValidPass123!\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Password change fails when current password is wrong")
+    void passwordChangeFailsWithWrongCurrentPassword() throws Exception {
+        UserEntity user = createOrGetUser("pwd_cust_err_" + System.nanoTime() + "@vaultora.com", UserRole.CUSTOMER);
+        MockHttpSession session = createSession(user);
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"IncorrectPass123!\",\"newPassword\":\"BrandNewPass456!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Current password does not match"));
+    }
+
+    @Test
+    @DisplayName("Password change fails when new password is same as current password")
+    void passwordChangeFailsWhenSamePassword() throws Exception {
+        UserEntity user = createOrGetUser("pwd_cust_same_" + System.nanoTime() + "@vaultora.com", UserRole.CUSTOMER);
+        MockHttpSession session = createSession(user);
+
+        mockMvc.perform(post("/api/v1/auth/password")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"ValidPass123!\",\"newPassword\":\"ValidPass123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("New password cannot be identical to current password"));
+    }
+
+    @Test
+    @DisplayName("Auditor and Admin can also change their own passwords")
+    void auditorAndAdminCanChangePassword() throws Exception {
+        UserEntity testAuditor = createOrGetUser("pwd_aud_" + System.nanoTime() + "@vaultora.com", UserRole.AUDITOR);
+        MockHttpSession auditorSession = createSession(testAuditor);
+        mockMvc.perform(post("/api/v1/auth/password")
+                .session(auditorSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"ValidPass123!\",\"newPassword\":\"AuditorNewPass123!\"}"))
+                .andExpect(status().isOk());
+
+        UserEntity testAdmin = createOrGetUser("pwd_adm_" + System.nanoTime() + "@vaultora.com", UserRole.ADMIN);
+        MockHttpSession adminSession = createSession(testAdmin);
+        mockMvc.perform(post("/api/v1/auth/password")
+                .session(adminSession)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"ValidPass123!\",\"newPassword\":\"AdminNewPass123!\"}"))
+                .andExpect(status().isOk());
+    }
 }

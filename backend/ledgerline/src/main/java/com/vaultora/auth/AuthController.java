@@ -132,4 +132,28 @@ public class AuthController {
                 .orElseThrow(() -> new BadCredentialsException("Authenticated user no longer exists"));
         return new AuthResponse(user.getId(), user.getEmail(), user.getRole().name());
     }
+    @PostMapping("/password")
+    public ResponseEntity<Map<String, String>> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            Authentication authentication,
+            HttpServletRequest httpRequest) {
+        if (authentication == null || authentication.getName() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        UserEntity user = userRepository.findByEmailIgnoreCase(authentication.getName())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        authService.changePassword(user, request);
+
+        String clientIp = httpRequest.getRemoteAddr();
+        auditService.recordEvent(
+                user,
+                "USER_PASSWORD_CHANGED",
+                "USER",
+                user.getId(),
+                Map.of("email", user.getEmail(), "role", user.getRole().name(), "ip", clientIp != null ? clientIp : "unknown")
+        );
+
+        return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
+    }
 }

@@ -6,6 +6,7 @@ import { accountRequestsApi } from '../api/accountRequests';
 import type { AccountResponse, AccountRequest } from '../api/types';
 import { formatCurrency, maskAccountNumber, formatDate } from '../utils/formatters';
 import { ApiException } from '../api/client';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 
 export const AccountsPage: React.FC = () => {
   const { user } = useAuth();
@@ -27,6 +28,7 @@ export const AccountsPage: React.FC = () => {
   const [closeError, setCloseError] = useState<string | null>(null);
 
   // Filter state
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
 
   const fetchData = async () => {
@@ -456,6 +458,16 @@ export const AccountsPage: React.FC = () => {
             }}>
               Role: <strong>{user?.role || 'CUSTOMER'}</strong> &bull; Total Accounts: <strong>{accounts.length}</strong> (Active: {activeAccountsCount}, Closed: {closedAccountsCount})
             </div>
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-start' }}>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setPasswordModalOpen(true)}
+                style={{ fontSize: '13px', padding: '6px 12px' }}
+              >
+                🔒 Change Password
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -625,6 +637,7 @@ export const AccountsPage: React.FC = () => {
           </div>
         </div>
       )}
+      <ChangePasswordModal isOpen={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
     </div>
   );
 };
