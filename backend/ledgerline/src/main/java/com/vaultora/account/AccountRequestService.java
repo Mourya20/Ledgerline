@@ -60,7 +60,12 @@ public class AccountRequestService {
         }
 
         AccountRequestEntity request = new AccountRequestEntity(user, targetCurrency);
-        AccountRequestEntity saved = accountRequestRepository.save(request);
+        AccountRequestEntity saved;
+        try {
+            saved = accountRequestRepository.saveAndFlush(request);
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw new IllegalArgumentException("You already have a pending account opening request awaiting administrator approval");
+        }
 
         Map<String, Object> details = new HashMap<>();
         details.put("requestId", saved.getId().toString());
@@ -99,7 +104,7 @@ public class AccountRequestService {
 
     @Transactional
     public AccountRequestResponse reviewRequest(UUID requestId, boolean approve, String adminNotes, UserEntity admin) {
-        AccountRequestEntity request = accountRequestRepository.findById(requestId)
+        AccountRequestEntity request = accountRequestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Account request not found: " + requestId));
 
         if (request.getStatus() != AccountRequestStatus.PENDING) {

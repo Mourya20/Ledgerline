@@ -7,6 +7,7 @@ import type { AccountResponse, AccountRequest } from '../api/types';
 import { formatCurrency, maskAccountNumber, formatDate } from '../utils/formatters';
 import { ApiException } from '../api/client';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { DownloadStatementModal } from '../components/DownloadStatementModal';
 
 export const AccountsPage: React.FC = () => {
   const { user } = useAuth();
@@ -29,6 +30,7 @@ export const AccountsPage: React.FC = () => {
 
   // Filter state
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [statementAccount, setStatementAccount] = useState<AccountResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
 
   const fetchData = async () => {
@@ -51,6 +53,8 @@ export const AccountsPage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(fetchData, 8000);
+    return () => clearInterval(interval);
   }, []);
 
   const pendingRequests = accountRequests.filter((r) => r.status === 'PENDING');
@@ -131,16 +135,30 @@ export const AccountsPage: React.FC = () => {
             Open, manage, monitor, and close your Vaultora bank accounts denominated in INR.
           </p>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            setError(null);
-            setCloseError(null);
-            setShowRequestModal(true);
-          }}
-        >
-          + Open new account
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => fetchData()}
+            disabled={loading}
+            style={{ fontSize: '13px', padding: '8px 14px' }}
+            title="Refresh accounts and request status"
+          >
+            ↻ Refresh
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setError(null);
+              setCloseError(null);
+              setShowRequestModal(true);
+            }}
+            disabled={hasPendingRequest}
+            title={hasPendingRequest ? 'You already have an account opening request pending administrator review' : undefined}
+          >
+            + Open new account
+          </button>
+        </div>
       </div>
 
       {successMessage && (
@@ -335,7 +353,7 @@ export const AccountsPage: React.FC = () => {
                     <button
                       className="btn-outline"
                       style={{ flex: 1, padding: '8px 10px', fontSize: '13px', minWidth: '80px' }}
-                      onClick={() => navigate(`/history?accountId=${account.id}`)}
+                      onClick={() => setStatementAccount(account)}
                     >
                       Statement
                     </button>
@@ -638,6 +656,11 @@ export const AccountsPage: React.FC = () => {
         </div>
       )}
       <ChangePasswordModal isOpen={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+      <DownloadStatementModal
+        isOpen={!!statementAccount}
+        onClose={() => setStatementAccount(null)}
+        account={statementAccount}
+      />
     </div>
   );
 };

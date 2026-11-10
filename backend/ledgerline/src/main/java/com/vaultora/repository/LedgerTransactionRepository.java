@@ -6,12 +6,13 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.vaultora.domain.LedgerTransactionEntity;
 
-public interface LedgerTransactionRepository extends JpaRepository<LedgerTransactionEntity, UUID> {
+public interface LedgerTransactionRepository extends JpaRepository<LedgerTransactionEntity, UUID>, JpaSpecificationExecutor<LedgerTransactionEntity> {
 
     Optional<LedgerTransactionEntity> findByInitiatedByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey);
 

@@ -113,11 +113,22 @@ public class AdminService {
 
     @Transactional
     public AccountEntity updateAccountStatus(UUID accountId, AccountStatus newStatus, UserEntity actor) {
-        AccountEntity account = accountRepository.findById(accountId)
+        AccountEntity account = accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found: " + accountId));
 
         if (account.getAccountType() != AccountType.CUSTOMER) {
             throw new IllegalArgumentException("Cannot modify status of system accounts");
+        }
+
+        if (account.getStatus() == AccountStatus.CLOSED) {
+            throw new IllegalArgumentException("Closed accounts cannot be reopened or have their status modified");
+        }
+
+        if (newStatus == AccountStatus.CLOSED) {
+            if (account.getBalance().compareTo(java.math.BigDecimal.ZERO) != 0) {
+                throw new IllegalArgumentException("Account balance must be 0.00 to close or delete an account. Current balance: "
+                        + account.getBalance() + " " + account.getCurrency() + ". Please transfer or withdraw all funds first.");
+            }
         }
 
         AccountStatus previousStatus = account.getStatus();

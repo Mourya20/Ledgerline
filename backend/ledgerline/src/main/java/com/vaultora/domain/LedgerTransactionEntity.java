@@ -47,11 +47,24 @@ public class LedgerTransactionEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "related_transaction_id")
+    private LedgerTransactionEntity relatedTransaction;
+
+    @Column(name = "reversal_reason", length = 255)
+    private String reversalReason;
+
     protected LedgerTransactionEntity() {
     }
 
     public LedgerTransactionEntity(String transactionType, TransactionStatus status, UserEntity initiatedByUser,
             String currency, String idempotencyKey, String requestFingerprint) {
+        this(transactionType, status, initiatedByUser, currency, idempotencyKey, requestFingerprint, null, null);
+    }
+
+    public LedgerTransactionEntity(String transactionType, TransactionStatus status, UserEntity initiatedByUser,
+            String currency, String idempotencyKey, String requestFingerprint,
+            LedgerTransactionEntity relatedTransaction, String reversalReason) {
         this.id = UUID.randomUUID();
         this.transactionType = transactionType;
         this.status = status;
@@ -59,6 +72,8 @@ public class LedgerTransactionEntity {
         this.currency = currency;
         this.idempotencyKey = idempotencyKey;
         this.requestFingerprint = requestFingerprint;
+        this.relatedTransaction = relatedTransaction;
+        this.reversalReason = reversalReason;
     }
 
     @PrePersist
@@ -109,5 +124,21 @@ public class LedgerTransactionEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public LedgerTransactionEntity getRelatedTransaction() {
+        return relatedTransaction;
+    }
+
+    public void setRelatedTransaction(LedgerTransactionEntity relatedTransaction) {
+        this.relatedTransaction = relatedTransaction;
+    }
+
+    public String getReversalReason() {
+        return reversalReason;
+    }
+
+    public void setReversalReason(String reversalReason) {
+        this.reversalReason = reversalReason;
     }
 }

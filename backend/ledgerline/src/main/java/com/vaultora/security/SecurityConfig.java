@@ -96,14 +96,29 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfTokens)
                         .csrfTokenRequestHandler(csrfRequestHandler))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/csrf",
-                                "/actuator/health")
+                        .requestMatchers(
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/csrf",
+                                "/api/v1/auth/forgot-password",
+                                "/api/v1/auth/reset-password",
+                                "/api/v1/auth/verify-email",
+                                "/api/v1/auth/resend-verification",
+                                "/v3/api-docs",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/api/v1/docs",
+                                "/actuator/health",
+                                "/actuator/health/**")
                         .permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/**").hasAnyRole("ADMIN", "AUDITOR")
                         .requestMatchers("/api/v1/audit/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/transactions/**").hasAnyRole("CUSTOMER", "ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts/**").hasAnyRole("CUSTOMER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts/*/close").hasAnyRole("CUSTOMER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/accounts/**").hasAnyRole("CUSTOMER", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/account-requests/*/approve", "/api/v1/account-requests/*/reject", "/api/v1/account-requests/*/accept").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/account-requests/**").hasAnyRole("CUSTOMER", "ADMIN", "AUDITOR")

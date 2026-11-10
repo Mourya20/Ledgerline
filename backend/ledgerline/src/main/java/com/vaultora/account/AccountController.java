@@ -40,18 +40,21 @@ public class AccountController {
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
     private final JdbcTemplate jdbcTemplate;
+    private final StatementService statementService;
 
     public AccountController(
             AccountService accountService,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             AuditService auditService,
-            JdbcTemplate jdbcTemplate) {
+            JdbcTemplate jdbcTemplate,
+            StatementService statementService) {
         this.accountService = accountService;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditService = auditService;
         this.jdbcTemplate = jdbcTemplate;
+        this.statementService = statementService;
     }
 
     @PostMapping
@@ -60,6 +63,11 @@ public class AccountController {
             @Valid @RequestBody(required = false) CreateAccountRequest request) {
         UserEntity actor = resolveUser(authentication);
         CreateAccountRequest req = (request != null) ? request : new CreateAccountRequest("INR");
+
+        if (actor.getRole() != UserRole.ADMIN) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Direct customer account creation is not permitted. Please submit an account opening request.");
+        }
 
         UserEntity targetUser;
         if (actor.getRole() == UserRole.ADMIN) {
@@ -199,6 +207,27 @@ public class AccountController {
         UserEntity actor = resolveUser(authentication);
         AccountResponse response = accountService.closeAccount(actor, accountId);
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{accountId}/statement")
+    public ResponseEntity<byte[]> getAccountStatement(
+            Authentication authentication,
+            @PathVariable UUID accountId,
+            @RequestParam(defaultValue = "pdf") String format,
+            @RequestParam(required = false) java.time.Instant startDate,
+            @RequestParam(required = false) java.time.Instant endDate) {
+        UserEntity actor = resolveUser(authentication);
+        byte[] bytes = statementService.generateStatement(accountId, actor, format, startDate, endDate);
+
+        boolean isCsv = "csv".equalsIgnoreCase(format);
+        String contentType = isCsv ? "text/csv; charset=UTF-8" : "application/pdf";
+        String ext = isCsv ? "csv" : "pdf";
+        String filename = String.format("statement-%s.%s", accountId, ext);
+
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(org.springframework.http.MediaType.parseMediaType(contentType))
+                .body(bytes);
     }
 
     private UserEntity resolveUser(Authentication authentication) {

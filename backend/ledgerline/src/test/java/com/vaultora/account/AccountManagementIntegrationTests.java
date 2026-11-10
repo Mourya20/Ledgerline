@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -31,6 +32,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.vaultora.domain.AccountEntity;
+import com.vaultora.domain.AccountRequestEntity;
+import com.vaultora.admin.AdminService;
 import com.vaultora.domain.AccountStatus;
 import com.vaultora.domain.AccountType;
 import com.vaultora.domain.UserEntity;
@@ -58,6 +61,9 @@ public class AccountManagementIntegrationTests {
 
     @Autowired
     private AccountRequestRepository accountRequestRepository;
+
+    @Autowired
+    private com.vaultora.admin.AdminService adminService;
 
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
@@ -651,5 +657,103 @@ public class AccountManagementIntegrationTests {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"currentPassword\":\"ValidPass123!\",\"newPassword\":\"AdminNewPass123!\"}"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Customer cannot directly create account via accounts endpoint")
+    void customerCannotDirectlyCreateAccountViaAccountsEndpoint() throws Exception {
+        MockHttpSession session = createSession(customer1);
+
+        mockMvc.perform(post("/api/v1/accounts")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Administrator cannot close an account with positive balance")
+    void adminCannotCloseAccountWithPositiveBalance() throws Exception {
+        // Deposit funds into customer2's account
+        transactionService.deposit(
+                customer2,
+                UUID.randomUUID().toString(),
+                new DepositRequest(customer2Account.getId(), new BigDecimal("300.00"), "INR")
+        );
+
+        MockHttpSession session = createSession(admin);
+
+        mockMvc.perform(patch("/api/v1/admin/accounts/" + customer2Account.getId() + "/status")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"CLOSED\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Closed account cannot be reopened or modified")
+    void closedAccountCannotBeReopened() throws Exception {
+        MockHttpSession session = createSession(admin);
+        // customer1ZeroBalanceAccount is zero balance, close it first
+        adminService.updateAccountStatus(customer1ZeroBalanceAccount.getId(), AccountStatus.CLOSED, admin);
+
+        AccountEntity closed = accountRepository.findById(customer1ZeroBalanceAccount.getId()).orElseThrow();
+        assertEquals(AccountStatus.CLOSED, closed.getStatus());
+
+        // Attempting to reopen as ACTIVE must fail
+        mockMvc.perform(patch("/api/v1/admin/accounts/" + closed.getId() + "/status")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Database enforces at most one pending request per customer")
+    void duplicatePendingRequestEnforcedByPartialUniqueIndex() throws Exception {
+        UserEntity user = createOrGetUser("single_pend_" + System.nanoTime() + "@vaultora.com", UserRole.CUSTOMER);
+        MockHttpSession session = createSession(user);
+
+        // First request succeeds
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isCreated());
+
+        // Second pending request must be rejected
+        mockMvc.perform(post("/api/v1/account-requests")
+                .session(session)
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currency\":\"INR\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("You already have a pending account opening request awaiting administrator approval"));
+    }
+
+    @Test
+    @DisplayName("Reviewing an already reviewed request fails")
+    void reviewingAlreadyReviewedRequestFails() throws Exception {
+        UserEntity user = createOrGetUser("dup_rev_" + System.nanoTime() + "@vaultora.com", UserRole.CUSTOMER);
+        AccountRequestEntity req = accountRequestRepository.save(new AccountRequestEntity(user, "INR"));
+
+        MockHttpSession session = createSession(admin);
+
+        // First review: approve
+        mockMvc.perform(post("/api/v1/account-requests/" + req.getId() + "/approve")
+                .session(session)
+                .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"));
+
+        // Second review attempt must fail
+        mockMvc.perform(post("/api/v1/account-requests/" + req.getId() + "/approve")
+                .session(session)
+                .with(csrf()))
+                .andExpect(status().isBadRequest());
     }
 }

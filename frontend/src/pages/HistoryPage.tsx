@@ -4,6 +4,7 @@ import { accountsApi } from '../api/accounts';
 import { transactionsApi } from '../api/transactions';
 import type { AccountResponse, Page, TransactionResponse } from '../api/types';
 import { formatDate, maskAccountNumber, parseCustomerTransaction } from '../utils/formatters';
+import { DownloadStatementModal } from '../components/DownloadStatementModal';
 
 export const HistoryPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -11,6 +12,7 @@ export const HistoryPage: React.FC = () => {
 
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(initialAccountId);
+  const [statementModalOpen, setStatementModalOpen] = useState(false);
   const [pageData, setPageData] = useState<Page<TransactionResponse> | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(0);
   const pageSize = 10;
@@ -111,8 +113,20 @@ export const HistoryPage: React.FC = () => {
           </select>
         </div>
 
-        <div style={{ fontSize: '12px', color: '#6B7280' }}>
-          {selectedAccountId ? 'Filtered by selected account' : 'Showing all account transactions'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ fontSize: '12px', color: '#6B7280' }}>
+            {selectedAccountId ? 'Filtered by selected account' : 'Showing all account transactions'}
+          </div>
+          {selectedAccountId && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '12px', padding: '6px 12px' }}
+              onClick={() => setStatementModalOpen(true)}
+            >
+              Download Statement
+            </button>
+          )}
         </div>
       </div>
 
@@ -219,6 +233,11 @@ export const HistoryPage: React.FC = () => {
           </div>
         )}
       </div>
+      <DownloadStatementModal
+        isOpen={statementModalOpen}
+        onClose={() => setStatementModalOpen(false)}
+        account={accounts.find((a) => a.id === selectedAccountId) || null}
+      />
     </div>
   );
 };

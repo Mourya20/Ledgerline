@@ -1,6 +1,7 @@
 package com.vaultora.auth;
 
 import java.util.Map;
+import java.util.Optional;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.vaultora.audit.AuditService;
 import com.vaultora.domain.UserEntity;
+import com.vaultora.domain.UserRole;
 import com.vaultora.repository.UserRepository;
 
 @RestController
@@ -37,19 +39,26 @@ public class AuthController {
     private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
     private final LoginRateLimiter loginRateLimiter;
     private final AuditService auditService;
+    private final PasswordRecoveryService passwordRecoveryService;
+    private final EmailVerificationService emailVerificationService;
 
-    public AuthController(AuthService authService,
+    public AuthController(
+            AuthService authService,
             UserRepository userRepository,
             SecurityContextRepository securityContextRepository,
             SessionAuthenticationStrategy sessionAuthenticationStrategy,
             LoginRateLimiter loginRateLimiter,
-            AuditService auditService) {
+            AuditService auditService,
+            PasswordRecoveryService passwordRecoveryService,
+            EmailVerificationService emailVerificationService) {
         this.authService = authService;
         this.userRepository = userRepository;
         this.securityContextRepository = securityContextRepository;
         this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
         this.loginRateLimiter = loginRateLimiter;
         this.auditService = auditService;
+        this.passwordRecoveryService = passwordRecoveryService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @GetMapping("/csrf")
@@ -68,6 +77,9 @@ public class AuthController {
                 .body(new AuthResponse(user.getId(), user.getEmail(), user.getRole().name()));
     }
 
+    @org.springframework.beans.factory.annotation.Value("${vaultora.auth.email-verification-required:true}")
+    private boolean emailVerificationRequired;
+
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
@@ -82,6 +94,21 @@ public class AuthController {
             auditService.recordEventRequiresNew(null, AuditService.ACTION_RATE_LIMIT_EXCEEDED, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp, "retryAfterSeconds", ex.getRetryAfterSeconds()));
             throw ex;
+        }
+
+        // Email verification check for CUSTOMER role
+        if (emailVerificationRequired) {
+            Optional<UserEntity> candidateUser = userRepository.findByEmailIgnoreCase(AuthService.normalizeEmail(request.email()));
+            if (candidateUser.isPresent()) {
+                UserEntity u = candidateUser.get();
+                if (u.getRole() == UserRole.CUSTOMER && !u.isEmailVerified()) {
+                    loginRateLimiter.recordFailure(clientIp, request.email());
+                    String finalIp = clientIp;
+                    auditService.recordEventRequiresNew(u, AuditService.ACTION_DISABLED_USER_ATTEMPT, "USER", u.getId(),
+                            Map.of("email", u.getEmail(), "ip", finalIp, "reason", "unverified_email"));
+                    throw new DisabledException("Email verification required. Please verify your email before signing in.");
+                }
+            }
         }
 
         Authentication authentication;
@@ -101,13 +128,11 @@ public class AuthController {
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp));
             throw ex;
         } catch (Exception ex) {
-            // Internal error or connection failure - do not increment failed-credential attempt counter
             auditService.recordEventRequiresNew(null, AuditService.ACTION_LOGIN_FAILURE, "USER", null,
                     Map.of("email", AuthService.normalizeEmail(request.email()), "ip", clientIp, "reason", "internal_error"));
             throw ex;
         }
 
-        // Apply SessionAuthenticationStrategy to ensure session fixation rotation
         sessionAuthenticationStrategy.onAuthentication(authentication, httpRequest, httpResponse);
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
@@ -132,6 +157,7 @@ public class AuthController {
                 .orElseThrow(() -> new BadCredentialsException("Authenticated user no longer exists"));
         return new AuthResponse(user.getId(), user.getEmail(), user.getRole().name());
     }
+
     @PostMapping("/password")
     public ResponseEntity<Map<String, String>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
@@ -155,5 +181,37 @@ public class AuthController {
         );
 
         return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(passwordRecoveryService.requestPasswordReset(request.email(), clientIp));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(passwordRecoveryService.resetPassword(request, clientIp));
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<Map<String, String>> verifyEmail(
+            @Valid @RequestBody VerifyEmailRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(emailVerificationService.verifyEmail(request.token(), clientIp));
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Map<String, String>> resendVerification(
+            @Valid @RequestBody ResendVerificationRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = httpRequest.getRemoteAddr();
+        return ResponseEntity.ok(emailVerificationService.resendVerification(request.email(), clientIp));
     }
 }

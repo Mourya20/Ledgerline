@@ -6,6 +6,9 @@ import { PublicRoute } from './components/PublicRoute';
 import { AppLayout } from './components/layout/AppLayout';
 import { SignInPage } from './pages/SignInPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { MoveMoneyPage } from './pages/MoveMoneyPage';
@@ -61,6 +64,30 @@ export const App: React.FC = () => {
             element={
               <PublicRoute>
                 <RegisterPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <PublicRoute>
+                <ForgotPasswordPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <PublicRoute>
+                <ResetPasswordPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/verify-email"
+            element={
+              <PublicRoute>
+                <VerifyEmailPage />
               </PublicRoute>
             }
           />

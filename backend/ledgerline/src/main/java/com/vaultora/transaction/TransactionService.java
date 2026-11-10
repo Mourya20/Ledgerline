@@ -64,18 +64,21 @@ public class TransactionService {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final AuditService auditService;
     private final EntityManager entityManager;
+    private final TransactionLimitService transactionLimitService;
 
     public TransactionService(
             AccountRepository accountRepository,
             LedgerTransactionRepository ledgerTransactionRepository,
             LedgerEntryRepository ledgerEntryRepository,
             AuditService auditService,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            TransactionLimitService transactionLimitService) {
         this.accountRepository = accountRepository;
         this.ledgerTransactionRepository = ledgerTransactionRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.auditService = auditService;
         this.entityManager = entityManager;
+        this.transactionLimitService = transactionLimitService;
     }
 
     @Transactional
@@ -217,6 +220,8 @@ public class TransactionService {
         validateAccountActive(customerAccount);
         validateAccountActive(systemAccount);
 
+        transactionLimitService.validateTransactionLimits(customerAccount.getId(), normalizedAmount, "WITHDRAWAL");
+
         // Balance validation occurs AFTER row locking
         if (customerAccount.getBalance().compareTo(normalizedAmount) < 0) {
             throw new InsufficientFundsException(
@@ -339,6 +344,8 @@ public class TransactionService {
 
         validateAccountActive(sourceAccount);
         validateAccountActive(destinationAccount);
+
+        transactionLimitService.validateTransactionLimits(sourceAccount.getId(), normalizedAmount, "TRANSFER");
 
         // Validate sender balance after locking
         if (sourceAccount.getBalance().compareTo(normalizedAmount) < 0) {

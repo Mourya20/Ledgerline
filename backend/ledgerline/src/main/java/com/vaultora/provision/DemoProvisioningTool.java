@@ -48,29 +48,30 @@ public class DemoProvisioningTool {
 
     public static final List<DemoUserSpec> SPECIFICATIONS = List.of(
             // 12 Customers (19 accounts total: 7*2 + 5*1)
-            new DemoUserSpec("customer1", "customer1@ledgerline.com", "customer1@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer2", "customer2@ledgerline.com", "customer2@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer3", "customer3@ledgerline.com", "customer3@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer4", "customer4@ledgerline.com", "customer4@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer5", "customer5@ledgerline.com", "customer5@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer6", "customer6@ledgerline.com", "customer6@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer7", "customer7@ledgerline.com", "customer7@ledgerline.com", "CUSTOMER", 2),
-            new DemoUserSpec("customer8", "customer8@ledgerline.com", "customer8@ledgerline.com", "CUSTOMER", 1),
-            new DemoUserSpec("customer9", "customer9@ledgerline.com", "customer9@ledgerline.com", "CUSTOMER", 1),
-            new DemoUserSpec("customer10", "customer10@ledgerline.com", "customer10@ledgerline.com", "CUSTOMER", 1),
-            new DemoUserSpec("customer11", "customer11@ledgerline.com", "customer11@ledgerline.com", "CUSTOMER", 1),
-            new DemoUserSpec("customer12", "customer12@ledgerline.com", "customer12@ledgerline.com", "CUSTOMER", 1),
+            new DemoUserSpec("customer1", "customer1@ledgerline.com", "customer1", "CUSTOMER", 2),
+            new DemoUserSpec("customer2", "customer2@ledgerline.com", "customer2", "CUSTOMER", 2),
+            new DemoUserSpec("customer3", "customer3@ledgerline.com", "customer3", "CUSTOMER", 2),
+            new DemoUserSpec("customer4", "customer4@ledgerline.com", "customer4", "CUSTOMER", 2),
+            new DemoUserSpec("customer5", "customer5@ledgerline.com", "customer5", "CUSTOMER", 2),
+            new DemoUserSpec("customer6", "customer6@ledgerline.com", "customer6", "CUSTOMER", 2),
+            new DemoUserSpec("customer7", "customer7@ledgerline.com", "customer7", "CUSTOMER", 2),
+            new DemoUserSpec("customer8", "customer8@ledgerline.com", "customer8", "CUSTOMER", 1),
+            new DemoUserSpec("customer9", "customer9@ledgerline.com", "customer9", "CUSTOMER", 1),
+            new DemoUserSpec("customer10", "customer10@ledgerline.com", "customer10", "CUSTOMER", 1),
+            new DemoUserSpec("customer11", "customer11@ledgerline.com", "customer11", "CUSTOMER", 1),
+            new DemoUserSpec("customer12", "customer12@ledgerline.com", "customer12", "CUSTOMER", 1),
 
             // 3 Auditors (0 accounts)
-            new DemoUserSpec("auditor1", "auditor1@ledgerline.com", "auditor1@ledgerline.com", "AUDITOR", 0),
-            new DemoUserSpec("auditor2", "auditor2@ledgerline.com", "auditor2@ledgerline.com", "AUDITOR", 0),
-            new DemoUserSpec("auditor3", "auditor3@ledgerline.com", "auditor3@ledgerline.com", "AUDITOR", 0),
+            new DemoUserSpec("auditor1", "auditor1@ledgerline.com", "auditor1", "AUDITOR", 0),
+            new DemoUserSpec("auditor2", "auditor2@ledgerline.com", "auditor2", "AUDITOR", 0),
+            new DemoUserSpec("auditor3", "auditor3@ledgerline.com", "auditor3", "AUDITOR", 0),
 
             // 1 Admin (0 accounts)
-            new DemoUserSpec("admin1", "admin1@ledgerline.com", "admin1@ledgerline.com", "ADMIN", 0)
+            new DemoUserSpec("admin1", "admin1@ledgerline.com", "admin1", "ADMIN", 0)
     );
 
     public static void main(String[] args) {
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"));
         boolean updatePasswordsIfMismatch = Arrays.asList(args).contains("--update-passwords");
         System.out.println("=== Vaultora Demonstration Provisioning Tool ===");
         System.out.println("Mode: Idempotent provisioning (updatePasswords=" + updatePasswordsIfMismatch + ")");
@@ -82,7 +83,12 @@ public class DemoProvisioningTool {
         System.out.println("Database URL:  " + dbUrl);
         System.out.println("Database User: " + dbUser);
 
-        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPass)) {
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("user", dbUser);
+        props.setProperty("password", dbPass);
+        props.setProperty("options", "-c TimeZone=UTC");
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, props)) {
             conn.setAutoCommit(false);
             try {
                 Map<String, List<String>> userAccountsMap = new LinkedHashMap<>();
@@ -274,7 +280,7 @@ public class DemoProvisioningTool {
         sb.append("- **Auditors 1–3:** 0 accounts (Strictly read-only audit log inspection)\n");
         sb.append("- **Admin 1:** 0 accounts (System administration and audit inspection)\n");
         sb.append("- **All Accounts:** Currency `INR`, Balance `₹0.00`, Status `ACTIVE`, Normal Balance `CREDIT`\n");
-        sb.append("- **Password Policy:** Plaintext matches complete email address, stored in database as BCrypt cost-10 hashes\n");
+        sb.append("- **Password Policy:** Plaintext matches username, stored in database as BCrypt cost-10 hashes\n");
 
         Files.writeString(targetFile, sb.toString());
         System.out.println("\n[SUCCESS] Local credential record written to: " + targetFile.toAbsolutePath());

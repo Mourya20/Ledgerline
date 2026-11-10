@@ -19,13 +19,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.vaultora.account.dto.AccountResponse;
 import com.vaultora.admin.dto.AdminStatsResponse;
+import com.vaultora.admin.dto.TransactionLimitResponse;
 import com.vaultora.admin.dto.UpdateAccountStatusRequest;
+import com.vaultora.admin.dto.UpdateTransactionLimitRequest;
 import com.vaultora.admin.dto.UpdateUserStatusRequest;
 import com.vaultora.admin.dto.UserSummaryResponse;
 import com.vaultora.domain.AccountEntity;
 import com.vaultora.domain.UserEntity;
 import com.vaultora.domain.UserRole;
 import com.vaultora.repository.UserRepository;
+import com.vaultora.transaction.TransactionLimitService;
+import org.springframework.web.bind.annotation.PutMapping;
 
 import jakarta.validation.Valid;
 
@@ -35,10 +39,15 @@ public class AdminController {
 
     private final AdminService adminService;
     private final UserRepository userRepository;
+    private final TransactionLimitService transactionLimitService;
 
-    public AdminController(AdminService adminService, UserRepository userRepository) {
+    public AdminController(
+            AdminService adminService,
+            UserRepository userRepository,
+            TransactionLimitService transactionLimitService) {
         this.adminService = adminService;
         this.userRepository = userRepository;
+        this.transactionLimitService = transactionLimitService;
     }
 
     @GetMapping("/stats")
@@ -89,6 +98,20 @@ public class AdminController {
         UserEntity actor = verifyAdmin(authentication);
         adminService.assignUserPassword(userId, request.password(), actor);
         return ResponseEntity.ok(Map.of("message", "Password assigned successfully"));
+    }
+
+    @GetMapping("/settings/limits")
+    public ResponseEntity<TransactionLimitResponse> getLimits(Authentication authentication) {
+        verifyAdmin(authentication);
+        return ResponseEntity.ok(transactionLimitService.getLimitsResponse());
+    }
+
+    @PutMapping("/settings/limits")
+    public ResponseEntity<TransactionLimitResponse> updateLimits(
+            Authentication authentication,
+            @Valid @RequestBody UpdateTransactionLimitRequest request) {
+        UserEntity actor = verifyAdmin(authentication);
+        return ResponseEntity.ok(transactionLimitService.updateLimits(actor, request));
     }
 
     private UserEntity verifyAdmin(Authentication authentication) {

@@ -93,7 +93,7 @@ public class AccountService {
 
     @Transactional
     public AccountResponse closeAccount(UserEntity actor, UUID accountId) {
-        AccountEntity account = accountRepository.findById(accountId)
+        AccountEntity account = accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new AccountNotFoundException("Account not found: " + accountId));
 
         if (account.getAccountType() == AccountType.SYSTEM) {

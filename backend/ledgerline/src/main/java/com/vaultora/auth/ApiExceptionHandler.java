@@ -23,6 +23,7 @@ import com.vaultora.exception.InvalidAmountException;
 import com.vaultora.exception.MissingIdempotencyKeyException;
 import com.vaultora.exception.SelfTransferException;
 import com.vaultora.exception.SystemAccountAccessException;
+import com.vaultora.exception.TransactionLimitExceededException;
 import com.vaultora.exception.TransactionNotFoundException;
 
 @RestControllerAdvice
@@ -35,9 +36,17 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "Email is already registered"));
     }
 
-    @ExceptionHandler({ BadCredentialsException.class, DisabledException.class })
+    @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, String>> invalidCredentials() {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
+    }
+
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<Map<String, String>> disabledAccount(DisabledException ex) {
+        String msg = (ex.getMessage() != null && !ex.getMessage().isBlank())
+                ? ex.getMessage()
+                : "Invalid credentials";
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", msg));
     }
 
     @ExceptionHandler(RateLimitExceededException.class)
@@ -97,6 +106,7 @@ public class ApiExceptionHandler {
         InvalidAmountException.class,
         SelfTransferException.class,
         MissingIdempotencyKeyException.class,
+        TransactionLimitExceededException.class,
         IllegalArgumentException.class
     })
     public ResponseEntity<Map<String, String>> badRequest(RuntimeException ex) {

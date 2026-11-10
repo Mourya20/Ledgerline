@@ -1,5 +1,14 @@
 import { apiClient, clearCsrfToken, fetchCsrfToken } from './client';
-import type { LoginRequest, RegisterRequest, UserResponse, ChangePasswordRequest } from './types';
+import type {
+  LoginRequest,
+  RegisterRequest,
+  UserResponse,
+  ChangePasswordRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  VerifyEmailRequest,
+  ResendVerificationRequest
+} from './types';
 
 export const authApi = {
   getCsrf: async () => {
@@ -28,6 +37,34 @@ export const authApi = {
 
   changePassword: async (data: ChangePasswordRequest): Promise<{ message: string }> => {
     return apiClient<{ message: string }>('/api/v1/auth/password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  forgotPassword: async (data: ForgotPasswordRequest): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>('/api/v1/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  resetPassword: async (data: ResetPasswordRequest): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>('/api/v1/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  verifyEmail: async (data: VerifyEmailRequest): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>('/api/v1/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  resendVerification: async (data: ResendVerificationRequest): Promise<{ message: string }> => {
+    return apiClient<{ message: string }>('/api/v1/auth/resend-verification', {
       method: 'POST',
       body: JSON.stringify(data),
     });

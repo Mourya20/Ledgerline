@@ -39,19 +39,31 @@ public class UserEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = true;
+
     protected UserEntity() {
     }
 
     public UserEntity(UUID id, String email, String passwordHash, UserRole role) {
+        this(id, email, passwordHash, role, true);
+    }
+
+    public UserEntity(UUID id, String email, String passwordHash, UserRole role, boolean emailVerified) {
         this.id = (id != null) ? id : UUID.randomUUID();
         this.email = email;
         this.passwordHash = passwordHash;
         this.role = role;
         this.status = UserStatus.ACTIVE;
+        this.emailVerified = emailVerified;
     }
 
     public UserEntity(String email, String passwordHash, UserRole role) {
-        this(UUID.randomUUID(), email, passwordHash, role);
+        this(UUID.randomUUID(), email, passwordHash, role, true);
+    }
+
+    public UserEntity(String email, String passwordHash, UserRole role, boolean emailVerified) {
+        this(UUID.randomUUID(), email, passwordHash, role, emailVerified);
     }
 
     @PrePersist
@@ -95,6 +107,14 @@ public class UserEntity {
 
     public void setStatus(UserStatus status) {
         this.status = status;
+    }
+
+    public boolean isEmailVerified() {
+        return emailVerified;
+    }
+
+    public void setEmailVerified(boolean emailVerified) {
+        this.emailVerified = emailVerified;
     }
 
     public Instant getCreatedAt() {

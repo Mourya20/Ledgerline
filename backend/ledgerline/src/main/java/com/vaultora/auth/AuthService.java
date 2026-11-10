@@ -22,14 +22,20 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JdbcTemplate jdbcTemplate;
+    private final EmailVerificationService emailVerificationService;
 
     public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder,
-            AuthenticationManager authenticationManager, JdbcTemplate jdbcTemplate) {
+            AuthenticationManager authenticationManager, JdbcTemplate jdbcTemplate,
+            EmailVerificationService emailVerificationService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.jdbcTemplate = jdbcTemplate;
+        this.emailVerificationService = emailVerificationService;
     }
+
+    @org.springframework.beans.factory.annotation.Value("${vaultora.auth.email-verification-required:true}")
+    private boolean emailVerificationRequired;
 
     @Transactional
     public UserEntity register(RegisterRequest request) {
@@ -38,7 +44,13 @@ public class AuthService {
             throw new DuplicateEmailException();
         }
         try {
-            return userRepository.save(new UserEntity(email, passwordEncoder.encode(request.password()), UserRole.CUSTOMER));
+            boolean verified = !emailVerificationRequired;
+            UserEntity user = new UserEntity(email, passwordEncoder.encode(request.password()), UserRole.CUSTOMER, verified);
+            UserEntity saved = userRepository.save(user);
+            if (!verified) {
+                emailVerificationService.createVerificationToken(saved);
+            }
+            return saved;
         } catch (DataIntegrityViolationException exception) {
             throw new DuplicateEmailException();
         }

@@ -141,13 +141,14 @@ public class Phase2FinancialEngineIntegrationTests {
         @DisplayName("Customer can create account with generated number and authenticated ownership")
         void customerCanCreateAccount() throws Exception {
             UserEntity customer = createAndAuthenticateUser("customer1@example.com", UserRole.CUSTOMER);
-            MockHttpSession session = loginSession("customer1@example.com", "Password123!");
+            createAndAuthenticateUser("admin_creator_p2@example.com", UserRole.ADMIN);
+            MockHttpSession session = loginSession("admin_creator_p2@example.com", "Password123!");
 
             MvcResult result = mockMvc.perform(post("/api/v1/accounts")
                     .session(session)
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"currency\":\"INR\"}"))
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"customer1@example.com\"}"))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.accountNumber").isNotEmpty())
                     .andExpect(jsonPath("$.currency").value("INR"))
@@ -172,13 +173,14 @@ public class Phase2FinancialEngineIntegrationTests {
         @DisplayName("Account numbers generated are unique across creations")
         void accountNumbersAreUnique() throws Exception {
             createAndAuthenticateUser("customer2@example.com", UserRole.CUSTOMER);
-            MockHttpSession session = loginSession("customer2@example.com", "Password123!");
+            createAndAuthenticateUser("admin_uniq_p2@example.com", UserRole.ADMIN);
+            MockHttpSession session = loginSession("admin_uniq_p2@example.com", "Password123!");
 
             MvcResult res1 = mockMvc.perform(post("/api/v1/accounts")
                     .session(session)
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"currency\":\"INR\"}"))
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"customer2@example.com\"}"))
                     .andExpect(status().isCreated())
                     .andReturn();
 
@@ -186,7 +188,7 @@ public class Phase2FinancialEngineIntegrationTests {
                     .session(session)
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"currency\":\"INR\"}"))
+                    .content("{\"currency\":\"INR\",\"customerEmail\":\"customer2@example.com\"}"))
                     .andExpect(status().isCreated())
                     .andReturn();
 
@@ -200,37 +202,32 @@ public class Phase2FinancialEngineIntegrationTests {
         @DisplayName("Customer cannot create account with unsupported currency")
         void cannotCreateAccountWithUnsupportedCurrency() throws Exception {
             createAndAuthenticateUser("customer3@example.com", UserRole.CUSTOMER);
-            MockHttpSession session = loginSession("customer3@example.com", "Password123!");
+            createAndAuthenticateUser("admin_curr_p2@example.com", UserRole.ADMIN);
+            MockHttpSession session = loginSession("admin_curr_p2@example.com", "Password123!");
 
             mockMvc.perform(post("/api/v1/accounts")
                     .session(session)
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"currency\":\"USD\"}"))
+                    .content("{\"currency\":\"USD\",\"customerEmail\":\"customer3@example.com\"}"))
                     .andExpect(status().isBadRequest());
         }
 
         @Test
         @DisplayName("Customer can list only their own accounts")
         void customerCanListOnlyOwnAccounts() throws Exception {
-            createAndAuthenticateUser("userA@example.com", UserRole.CUSTOMER);
-            createAndAuthenticateUser("userB@example.com", UserRole.CUSTOMER);
+            UserEntity userA = createAndAuthenticateUser("userA@example.com", UserRole.CUSTOMER);
+            UserEntity userB = createAndAuthenticateUser("userB@example.com", UserRole.CUSTOMER);
 
             MockHttpSession sessionA = loginSession("userA@example.com", "Password123!");
             MockHttpSession sessionB = loginSession("userB@example.com", "Password123!");
 
             // User A creates 2 accounts
-            mockMvc.perform(post("/api/v1/accounts").session(sessionA).with(csrf())
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"currency\":\"INR\"}"))
-                    .andExpect(status().isCreated());
-            mockMvc.perform(post("/api/v1/accounts").session(sessionA).with(csrf())
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"currency\":\"INR\"}"))
-                    .andExpect(status().isCreated());
+            createAccountForUser(userA, "INR");
+            createAccountForUser(userA, "INR");
 
             // User B creates 1 account
-            mockMvc.perform(post("/api/v1/accounts").session(sessionB).with(csrf())
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"currency\":\"INR\"}"))
-                    .andExpect(status().isCreated());
+            createAccountForUser(userB, "INR");
 
             // User A retrieves list
             mockMvc.perform(get("/api/v1/accounts").session(sessionA))
@@ -246,18 +243,12 @@ public class Phase2FinancialEngineIntegrationTests {
         @Test
         @DisplayName("Customer cannot access another customer's account by ID")
         void customerCannotAccessAnotherCustomerAccount() throws Exception {
-            createAndAuthenticateUser("ownerA@example.com", UserRole.CUSTOMER);
+            UserEntity ownerA = createAndAuthenticateUser("ownerA@example.com", UserRole.CUSTOMER);
             createAndAuthenticateUser("attackerB@example.com", UserRole.CUSTOMER);
 
-            MockHttpSession sessionA = loginSession("ownerA@example.com", "Password123!");
             MockHttpSession sessionB = loginSession("attackerB@example.com", "Password123!");
 
-            MvcResult resA = mockMvc.perform(post("/api/v1/accounts").session(sessionA).with(csrf())
-                    .contentType(MediaType.APPLICATION_JSON).content("{\"currency\":\"INR\"}"))
-                    .andExpect(status().isCreated())
-                    .andReturn();
-
-            UUID accountIdA = UUID.fromString(JsonPath.read(resA.getResponse().getContentAsString(), "$.id"));
+            UUID accountIdA = createAccountForUser(ownerA, "INR");
 
             // Attacker B attempts to access A's account details
             mockMvc.perform(get("/api/v1/accounts/" + accountIdA).session(sessionB))
@@ -1570,13 +1561,12 @@ public class Phase2FinancialEngineIntegrationTests {
         @Test
         @DisplayName("Customer AccountResponse does not expose normalBalance")
         void accountResponseDoesNotExposeNormalBalance() throws Exception {
-            createAndAuthenticateUser("acc_priv@example.com", UserRole.CUSTOMER);
+            UserEntity user = createAndAuthenticateUser("acc_priv@example.com", UserRole.CUSTOMER);
             MockHttpSession session = loginSession("acc_priv@example.com", "Password123!");
+            UUID accId = createAccountForUser(user, "INR");
 
-            mockMvc.perform(post("/api/v1/accounts").session(session).with(csrf())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"currency\":\"INR\"}"))
-                    .andExpect(status().isCreated())
+            mockMvc.perform(get("/api/v1/accounts/" + accId).session(session))
+                    .andExpect(status().isOk())
                     .andExpect(jsonPath("$.normalBalance").doesNotExist());
         }
 

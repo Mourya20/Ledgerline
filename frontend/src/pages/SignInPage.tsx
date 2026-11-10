@@ -41,7 +41,11 @@ export const SignInPage: React.FC = () => {
           const waitTime = err.retryAfter ? `${err.retryAfter} seconds` : 'the cooldown window';
           setError(`Too many failed login attempts. Please wait ${waitTime} before trying again.`);
         } else if (err.status === 401 || err.status === 403) {
-          setError('Invalid email or password.');
+          if (err.message && err.message.toLowerCase().includes('verification')) {
+            setError(err.message);
+          } else {
+            setError('Invalid email or password.');
+          }
         } else {
           setError(err.message || 'Login failed. Please check your credentials.');
         }
@@ -108,7 +112,14 @@ export const SignInPage: React.FC = () => {
 
         {error && (
           <div className="alert-error" style={{ marginBottom: '16px' }}>
-            {error}
+            <div>{error}</div>
+            {error.toLowerCase().includes('verification') && (
+              <div style={{ marginTop: '6px' }}>
+                <Link to="/verify-email" style={{ color: '#0D6E64', fontWeight: 600, textDecoration: 'underline' }}>
+                  Verify email or resend link &rarr;
+                </Link>
+              </div>
+            )}
           </div>
         )}
 
@@ -129,12 +140,17 @@ export const SignInPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="password">Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="form-label" htmlFor="password" style={{ margin: 0 }}>Password</label>
+              <Link to="/forgot-password" style={{ fontSize: '12px', color: '#0D6E64', textDecoration: 'none', fontWeight: 500 }}>
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
               className="form-input"
-              placeholder="•••••••• (e.g. customer1@ledgerline.com)"
+              placeholder="•••••••• (e.g. customer1)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isSubmitting}
@@ -183,7 +199,7 @@ export const SignInPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => handlePrefill('customer1@ledgerline.com', 'customer1@ledgerline.com')}
+                onClick={() => handlePrefill('customer1@ledgerline.com', 'customer1')}
                 disabled={isSubmitting}
                 style={{
                   fontSize: '11px',
@@ -216,7 +232,7 @@ export const SignInPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => handlePrefill('auditor1@ledgerline.com', 'auditor1@ledgerline.com')}
+                onClick={() => handlePrefill('auditor1@ledgerline.com', 'auditor1')}
                 disabled={isSubmitting}
                 style={{
                   fontSize: '11px',
@@ -249,7 +265,7 @@ export const SignInPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                onClick={() => handlePrefill('admin1@ledgerline.com', 'admin1@ledgerline.com')}
+                onClick={() => handlePrefill('admin1@ledgerline.com', 'admin1')}
                 disabled={isSubmitting}
                 style={{
                   fontSize: '11px',

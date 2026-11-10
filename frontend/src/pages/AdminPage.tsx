@@ -15,6 +15,8 @@ import type {
   AccountRequest,
   AccountStatus,
   UserStatus,
+  MakerCheckerResponse,
+  TransactionLimitResponse,
 } from '../api/types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { PortalSwitcher } from '../components/PortalSwitcher';
@@ -41,7 +43,7 @@ const DEMO_AUDITORS: string[] = [
   'auditor3@ledgerline.com',
 ];
 
-type AdminTab = 'overview' | 'accounts' | 'requests' | 'users' | 'transactions' | 'deposit';
+type AdminTab = 'overview' | 'accounts' | 'requests' | 'maker-checker' | 'limits' | 'users' | 'transactions' | 'deposit';
 
 export const AdminPage: React.FC = () => {
   const { user, logout } = useAuth();
@@ -76,6 +78,29 @@ export const AdminPage: React.FC = () => {
     if (requestFilter === 'REJECTED') return req.status === 'REJECTED';
     return true;
   });
+
+  // Maker-Checker state
+  const [makerCheckerRequests, setMakerCheckerRequests] = useState<MakerCheckerResponse[]>([]);
+  const [makerCheckerLoading, setMakerCheckerLoading] = useState<boolean>(false);
+  const [makerCheckerError, setMakerCheckerError] = useState<string | null>(null);
+  const [makerCheckerSuccess, setMakerCheckerSuccess] = useState<string | null>(null);
+  const [makerCheckerFilter, setMakerCheckerFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+
+  const pendingMakerCheckerCount = makerCheckerRequests.filter((r) => r.status === 'PENDING').length;
+  const filteredMakerCheckerRequests = makerCheckerRequests.filter((req) => {
+    if (makerCheckerFilter === 'PENDING') return req.status === 'PENDING';
+    if (makerCheckerFilter === 'APPROVED') return req.status === 'APPROVED';
+    if (makerCheckerFilter === 'REJECTED') return req.status === 'REJECTED';
+    return true;
+  });
+
+  // Limits state
+  const [limits, setLimits] = useState<TransactionLimitResponse | null>(null);
+  const [limitsLoading, setLimitsLoading] = useState<boolean>(false);
+  const [limitsError, setLimitsError] = useState<string | null>(null);
+  const [limitsSuccess, setLimitsSuccess] = useState<string | null>(null);
+  const [maxPerTxInput, setMaxPerTxInput] = useState<string>('500000');
+  const [maxDailyInput, setMaxDailyInput] = useState<string>('2000000');
 
   // Accounts state
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
@@ -226,6 +251,95 @@ export const AdminPage: React.FC = () => {
     }
   }, []);
 
+  const fetchMakerChecker = useCallback(async () => {
+    try {
+      setMakerCheckerLoading(true);
+      setMakerCheckerError(null);
+      const data = await adminApi.getMakerCheckerRequests();
+      setMakerCheckerRequests(data);
+    } catch (err: unknown) {
+      setMakerCheckerError(err instanceof Error ? err.message : 'Failed to retrieve maker-checker requests');
+    } finally {
+      setMakerCheckerLoading(false);
+    }
+  }, []);
+
+  const fetchLimits = useCallback(async () => {
+    try {
+      setLimitsLoading(true);
+      setLimitsError(null);
+      const data = await adminApi.getLimits();
+      setLimits(data);
+      setMaxPerTxInput(data.maxPerTransaction.toString());
+      setMaxDailyInput(data.maxDailyTotal.toString());
+    } catch (err: unknown) {
+      setLimitsError(err instanceof Error ? err.message : 'Failed to retrieve transaction limits');
+    } finally {
+      setLimitsLoading(false);
+    }
+  }, []);
+
+  const handleApproveMakerChecker = async (req: MakerCheckerResponse) => {
+    try {
+      setMakerCheckerError(null);
+      setMakerCheckerSuccess(null);
+      await adminApi.approveMakerCheckerRequest(req.id);
+      setMakerCheckerSuccess(`Request for ${req.requestType} approved and executed successfully.`);
+      fetchMakerChecker();
+      fetchTransactions();
+      fetchAccounts();
+      fetchStats();
+    } catch (err: unknown) {
+      setMakerCheckerError(err instanceof Error ? err.message : 'Failed to approve request');
+    }
+  };
+
+  const handleRejectMakerChecker = async (req: MakerCheckerResponse) => {
+    const reason = window.prompt('Enter rejection reason for this request:');
+    if (reason === null) return;
+    try {
+      setMakerCheckerError(null);
+      setMakerCheckerSuccess(null);
+      await adminApi.rejectMakerCheckerRequest(req.id, reason);
+      setMakerCheckerSuccess('Request rejected.');
+      fetchMakerChecker();
+    } catch (err: unknown) {
+      setMakerCheckerError(err instanceof Error ? err.message : 'Failed to reject request');
+    }
+  };
+
+  const handleSaveLimits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLimitsLoading(true);
+      setLimitsError(null);
+      setLimitsSuccess(null);
+      const res = await adminApi.updateLimits({
+        maxPerTransaction: Number(maxPerTxInput),
+        maxDailyTotal: Number(maxDailyInput),
+      });
+      setLimits(res);
+      setLimitsSuccess('Transaction limits updated successfully.');
+    } catch (err: unknown) {
+      setLimitsError(err instanceof Error ? err.message : 'Failed to update transaction limits');
+    } finally {
+      setLimitsLoading(false);
+    }
+  };
+
+  const handleInitiateReversal = async (txId: string) => {
+    const reason = window.prompt('Enter reason for reversing this transaction:');
+    if (!reason || !reason.trim()) return;
+    try {
+      setTransactionsError(null);
+      await adminApi.initiateReversal(txId, reason.trim());
+      alert('Reversal request created and added to the Maker-Checker approval queue for second administrator review.');
+      fetchMakerChecker();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to initiate reversal');
+    }
+  };
+
   // Initial load
   useEffect(() => {
     fetchHealth();
@@ -233,7 +347,10 @@ export const AdminPage: React.FC = () => {
     fetchAccounts();
     fetchUsers();
     fetchTransactions();
-  }, [fetchHealth, fetchStats, fetchAccounts, fetchUsers, fetchTransactions]);
+    fetchAccountRequests();
+    fetchMakerChecker();
+    fetchLimits();
+  }, [fetchHealth, fetchStats, fetchAccounts, fetchUsers, fetchTransactions, fetchAccountRequests, fetchMakerChecker, fetchLimits]);
 
 
   // Automatically refresh requests when switching to requests tab
@@ -243,13 +360,14 @@ export const AdminPage: React.FC = () => {
     }
   }, [activeTab, fetchAccountRequests]);
 
-  // Periodic polling for incoming account requests
+  // Periodic polling for incoming account requests and maker-checker
   useEffect(() => {
     const timer = setInterval(() => {
       fetchAccountRequests();
+      fetchMakerChecker();
     }, 10000);
     return () => clearInterval(timer);
-  }, [fetchAccountRequests]);
+  }, [fetchAccountRequests, fetchMakerChecker]);
 
   const handleLogout = async () => {
     await logout();
@@ -574,6 +692,20 @@ export const AdminPage: React.FC = () => {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <PortalSwitcher />
+          <button
+            type="button"
+            onClick={() => setAdminOwnPasswordModalOpen(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '13px',
+              color: '#4B5563',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            Change password
+          </button>
           {user && (
             <span style={{ fontSize: '13px', color: '#4B5563' }}>
               {user.email}
@@ -615,6 +747,8 @@ export const AdminPage: React.FC = () => {
             { id: 'overview', label: 'Overview & Diagnostics' },
             { id: 'accounts', label: `Accounts Directory (${accounts.length})` },
             { id: 'requests', label: pendingRequestsCount > 0 ? `Account Requests (${pendingRequestsCount} Pending)` : `Account Requests (${accountRequests.length})` },
+            { id: 'maker-checker', label: pendingMakerCheckerCount > 0 ? `Maker-Checker (${pendingMakerCheckerCount} Pending)` : `Maker-Checker (${makerCheckerRequests.length})` },
+            { id: 'limits', label: 'Transaction Limits' },
             { id: 'users', label: `Users & Roles (${users.length})` },
             { id: 'transactions', label: `Bank-Wide Transactions (${transactions.length})` },
             { id: 'deposit', label: 'Administrative Credit / Deposit' },
@@ -837,32 +971,14 @@ export const AdminPage: React.FC = () => {
                   </label>
                 </div>
 
-                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  onClick={() => fetchAccountRequests()}
-                  disabled={accountRequestsLoading}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    color: '#0D6E64',
-                    borderColor: '#0D6E64'
-                  }}
-                  title="Refresh account requests"
-                >
-                  ↻ Refresh
-                </button>
-                  <input
-                    type="email"
-                    list={customerListId}
-                    value={targetEmail}
-                    onChange={(e) => setTargetEmail(e.target.value)}
-                    placeholder="Enter customer or auditor email (existing or new)"
-                    className="input-field"
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="email"
+                  list={customerListId}
+                  value={targetEmail}
+                  onChange={(e) => setTargetEmail(e.target.value)}
+                  placeholder="Enter customer or auditor email (existing or new)"
+                  className="input-field"
                     style={{ flex: 1, minWidth: '260px' }}
                     disabled={creatingAccount}
                   />
@@ -1259,7 +1375,25 @@ export const AdminPage: React.FC = () => {
                   Review, approve, or reject customer requests to open new bank accounts.
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => fetchAccountRequests()}
+                  disabled={accountRequestsLoading}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: '#0D6E64',
+                    borderColor: '#0D6E64'
+                  }}
+                  title="Refresh account requests"
+                >
+                  ↻ Refresh
+                </button>
                 {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((filter) => (
                   <button
                     key={filter}
@@ -1425,6 +1559,268 @@ export const AdminPage: React.FC = () => {
           </div>
         )}
 
+
+        {/* TAB: MAKER-CHECKER APPROVAL QUEUE */}
+        {activeTab === 'maker-checker' && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: 0 }}>
+                  Maker-Checker Dual-Authorization Queue
+                </h2>
+                <p style={{ fontSize: '13px', color: '#6B7280', margin: '2px 0 0 0' }}>
+                  Enforces mandatory 2-administrator separation of duty for large transfers and reversals. No ledger postings occur until approved.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => fetchAccountRequests()}
+                  disabled={accountRequestsLoading}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: '#0D6E64',
+                    borderColor: '#0D6E64'
+                  }}
+                  title="Refresh account requests"
+                >
+                  ↻ Refresh
+                </button>
+                {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setMakerCheckerFilter(filter)}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '12px',
+                      fontWeight: makerCheckerFilter === filter ? 600 : 500,
+                      borderRadius: '6px',
+                      border: '1px solid',
+                      borderColor: makerCheckerFilter === filter ? '#0D6E64' : '#D1D5DB',
+                      backgroundColor: makerCheckerFilter === filter ? '#E6F4F2' : '#FFFFFF',
+                      color: makerCheckerFilter === filter ? '#0D6E64' : '#374151',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {filter === 'ALL'
+                      ? `All (${makerCheckerRequests.length})`
+                      : filter === 'PENDING'
+                      ? `Pending (${pendingMakerCheckerCount})`
+                      : filter}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {makerCheckerSuccess && (
+              <div className="alert alert-success" role="alert" style={{ marginBottom: '16px' }}>
+                {makerCheckerSuccess}
+              </div>
+            )}
+
+            {makerCheckerError && (
+              <div className="alert alert-danger" role="alert" style={{ marginBottom: '16px' }}>
+                {makerCheckerError}
+              </div>
+            )}
+
+            {makerCheckerLoading && makerCheckerRequests.length === 0 ? (
+              <div style={{ padding: '32px 0', color: '#6B7280', textAlign: 'center' }}>
+                Loading approval requests...
+              </div>
+            ) : filteredMakerCheckerRequests.length === 0 ? (
+              <div style={{ padding: '32px 0', color: '#6B7280', textAlign: 'center' }}>
+                No maker-checker requests found for this filter.
+              </div>
+            ) : (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Operation Type</th>
+                      <th>Status</th>
+                      <th>Initiated By (Maker)</th>
+                      <th>Amount</th>
+                      <th>Details / Reason</th>
+                      <th>Date</th>
+                      <th style={{ textAlign: 'right' }}>Actions (Checker)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMakerCheckerRequests.map((req) => {
+                      const isPending = req.status === 'PENDING';
+                      const isSelf = user && req.initiatedByEmail === user.email;
+
+                      return (
+                        <tr key={req.id}>
+                          <td style={{ fontWeight: 600, fontSize: '13px' }}>
+                            <span className="badge badge-blue" style={{ fontSize: '11px' }}>
+                              {req.requestType}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${
+                                req.status === 'APPROVED' ? 'badge-green' : req.status === 'PENDING' ? 'badge-yellow' : 'badge-red'
+                              }`}
+                              style={{ fontSize: '11px' }}
+                            >
+                              {req.status}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '13px' }}>
+                            {req.initiatedByEmail}
+                            {isSelf && (
+                              <span style={{ display: 'block', fontSize: '11px', color: '#D97706', fontWeight: 600 }}>
+                                (You created this)
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ fontSize: '13px', fontWeight: 600 }}>
+                            {req.amount ? formatCurrency(req.amount, req.currency) : '—'}
+                          </td>
+                          <td style={{ fontSize: '12px', color: '#4B5563', maxWidth: '280px' }}>
+                            <div>{req.description}</div>
+                            {req.rejectionReason && (
+                              <div style={{ color: '#DC2626', marginTop: '2px' }}>
+                                Reason: {req.rejectionReason}
+                              </div>
+                            )}
+                            {req.reviewedByEmail && (
+                              <div style={{ color: '#6B7280', fontSize: '11px', marginTop: '2px' }}>
+                                Reviewed by: {req.reviewedByEmail}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ fontSize: '12px', color: '#6B7280' }}>
+                            {formatDate(req.createdAt)}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {isPending ? (
+                              isSelf ? (
+                                <span style={{ fontSize: '11px', color: '#D97706', fontStyle: 'italic' }}>
+                                  Awaiting 2nd Admin
+                                </span>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: '#0D6E64' }}
+                                    onClick={() => handleApproveMakerChecker(req)}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-outline"
+                                    style={{ padding: '4px 10px', fontSize: '12px', color: '#DC2626', borderColor: '#FECACA' }}
+                                    onClick={() => handleRejectMakerChecker(req)}
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              )
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#9CA3AF' }}>Done</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: TRANSACTION LIMITS */}
+        {activeTab === 'limits' && (
+          <div className="card" style={{ maxWidth: '600px' }}>
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: '0 0 4px 0' }}>
+              Transaction & Daily Debit Limits
+            </h2>
+            <p style={{ fontSize: '13px', color: '#6B7280', margin: '0 0 20px 0' }}>
+              Configure backend-enforced maximum debit amounts per transaction and aggregate daily debit limit across all customer accounts.
+            </p>
+
+            {limitsSuccess && (
+              <div className="alert alert-success" style={{ marginBottom: '16px' }}>
+                {limitsSuccess}
+              </div>
+            )}
+            {limitsError && (
+              <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
+                {limitsError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveLimits}>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" htmlFor="max-per-tx">
+                  Maximum Per-Transaction Amount (INR)
+                </label>
+                <input
+                  id="max-per-tx"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  className="form-input"
+                  value={maxPerTxInput}
+                  onChange={(e) => setMaxPerTxInput(e.target.value)}
+                  disabled={limitsLoading}
+                  required
+                />
+                <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                  Maximum allowed amount for an individual customer withdrawal or transfer.
+                </span>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label className="form-label" htmlFor="max-daily-total">
+                  Maximum Aggregate Daily Debit Amount (INR)
+                </label>
+                <input
+                  id="max-daily-total"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  className="form-input"
+                  value={maxDailyInput}
+                  onChange={(e) => setMaxDailyInput(e.target.value)}
+                  disabled={limitsLoading}
+                  required
+                />
+                <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                  Maximum cumulative debit volume (withdrawals + transfers) per account per UTC day.
+                </span>
+              </div>
+
+              {limits && (
+                <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '20px', padding: '10px', backgroundColor: '#F9FAFB', borderRadius: '6px' }}>
+                  <div>Last updated: {formatDate(limits.updatedAt)}</div>
+                  {limits.updatedByEmail && <div>Updated by: {limits.updatedByEmail}</div>}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="btn-primary"
+                style={{ padding: '9px 18px', backgroundColor: '#0D6E64' }}
+                disabled={limitsLoading}
+              >
+                {limitsLoading ? 'Saving...' : 'Save Limit Configuration'}
+              </button>
+            </form>
+          </div>
+        )}
         {/* TAB 3: USER & ROLE MANAGEMENT */}
         {activeTab === 'users' && (
           <div className="card">
@@ -1724,6 +2120,7 @@ export const AdminPage: React.FC = () => {
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Date</th>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Debits (Asset / Source)</th>
                       <th style={{ padding: '10px 14px', fontWeight: 600 }}>Credits (Liability / Destination)</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1754,6 +2151,18 @@ export const AdminPage: React.FC = () => {
                                 {c.accountNumber}: <strong>{formatCurrency(c.amount, c.currency)}</strong>
                               </div>
                             ))}
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                            {tx.status === 'COMPLETED' && (
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{ padding: '4px 8px', fontSize: '11px', color: '#DC2626', borderColor: '#FECACA' }}
+                                onClick={() => handleInitiateReversal(tx.id)}
+                              >
+                                Reverse
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1852,84 +2261,162 @@ export const AdminPage: React.FC = () => {
             </form>
           </div>
         )}
-        {/* Assign Password Modal */}
-        {passwordModalUser && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            zIndex: 1000
-          }}>
-            <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span className="badge badge-blue" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
-                  Admin Privilege
-                </span>
-                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                  Assign User Password
-                </h3>
-              </div>
-              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
-                Assign or reset password for <strong>{passwordModalUser.email}</strong> ({passwordModalUser.role}).
-              </p>
-
-              {assignPasswordError && (
-                <div className="alert alert-danger" role="alert" style={{ marginBottom: '14px', fontSize: '12px' }}>
-                  {assignPasswordError}
-                </div>
-              )}
-
-              <form onSubmit={handleAssignPassword}>
-                <div className="form-group" style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
-                    New Password (min 12 characters, max 72 bytes)
-                  </label>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Enter new password"
-                    className="input-field"
-                    style={{ width: '100%' }}
-                    disabled={assigningPassword}
-                    required
-                    minLength={12}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setPasswordModalUser(null);
-                      setNewPassword('');
-                      setAssignPasswordError(null);
-                    }}
-                    disabled={assigningPassword}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={assigningPassword || newPassword.length < 12}
-                  >
-                    {assigningPassword ? 'Assigning...' : 'Confirm & Assign'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
+        {/* Assign Password Modal */}
+
+        {passwordModalUser && (
+
+          <div style={{
+
+            position: 'fixed',
+
+            top: 0,
+
+            left: 0,
+
+            right: 0,
+
+            bottom: 0,
+
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+
+            display: 'flex',
+
+            alignItems: 'center',
+
+            justifyContent: 'center',
+
+            padding: '20px',
+
+            zIndex: 1000
+
+          }}>
+
+            <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '24px' }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+
+                <span className="badge badge-blue" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+
+                  Admin Privilege
+
+                </span>
+
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', margin: 0 }}>
+
+                  Assign User Password
+
+                </h3>
+
+              </div>
+
+              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
+
+                Assign or reset password for <strong>{passwordModalUser.email}</strong> ({passwordModalUser.role}).
+
+              </p>
+
+
+
+              {assignPasswordError && (
+
+                <div className="alert alert-danger" role="alert" style={{ marginBottom: '14px', fontSize: '12px' }}>
+
+                  {assignPasswordError}
+
+                </div>
+
+              )}
+
+
+
+              <form onSubmit={handleAssignPassword}>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+
+                    New Password (min 12 characters, max 72 bytes)
+
+                  </label>
+
+                  <input
+
+                    type="password"
+
+                    value={newPassword}
+
+                    onChange={(e) => setNewPassword(e.target.value)}
+
+                    placeholder="Enter new password"
+
+                    className="input-field"
+
+                    style={{ width: '100%' }}
+
+                    disabled={assigningPassword}
+
+                    required
+
+                    minLength={12}
+
+                  />
+
+                </div>
+
+
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+
+                  <button
+
+                    type="button"
+
+                    className="btn btn-secondary"
+
+                    onClick={() => {
+
+                      setPasswordModalUser(null);
+
+                      setNewPassword('');
+
+                      setAssignPasswordError(null);
+
+                    }}
+
+                    disabled={assigningPassword}
+
+                  >
+
+                    Cancel
+
+                  </button>
+
+                  <button
+
+                    type="submit"
+
+                    className="btn btn-primary"
+
+                    disabled={assigningPassword || newPassword.length < 12}
+
+                  >
+
+                    {assigningPassword ? 'Assigning...' : 'Confirm & Assign'}
+
+                  </button>
+
+                </div>
+
+              </form>
+
+            </div>
+
+          </div>
+
+        )}
+
+
+
         {/* CUSTOMER ACCOUNTS INSPECTOR MODAL */}
         {inspectedCustomer && (
           <div style={{
