@@ -44,8 +44,13 @@ export const VerifyEmailPage: React.FC = () => {
 
     try {
       setIsResending(true);
-      const res = await authApi.resendVerification({ email: resendEmail.trim() });
-      setResendMessage(res.message || 'If an unverified account exists with that email, a verification link has been sent.');
+      const res = (await authApi.resendVerification({ email: resendEmail.trim() })) as { message?: string; token?: string; link?: string };
+      if (res.token) {
+        setToken(res.token);
+        setResendMessage(`Verification token received: ${res.token}. It has been filled into the input above.`);
+      } else {
+        setResendMessage(res.message || 'If an unverified account exists with that email, a verification link has been sent.');
+      }
     } catch (err: unknown) {
       setResendMessage('If an unverified account exists with that email, a verification link has been sent.');
     } finally {

@@ -33,6 +33,16 @@ export const AccountsPage: React.FC = () => {
   const [statementAccount, setStatementAccount] = useState<AccountResponse | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED'>('ALL');
 
+  // Reveal/mask account number toggle state
+  const [revealedAccounts, setRevealedAccounts] = useState<Record<string, boolean>>({});
+
+  const toggleAccountReveal = (accountId: string) => {
+    setRevealedAccounts((prev) => ({
+      ...prev,
+      [accountId]: !prev[accountId],
+    }));
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -337,11 +347,46 @@ export const AccountsPage: React.FC = () => {
                   </div>
 
                   <div style={{ fontSize: '17px', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
-                    Account {maskAccountNumber(account.accountNumber)}
+                    Account {revealedAccounts[account.id] ? account.accountNumber : maskAccountNumber(account.accountNumber)}
                   </div>
 
-                  <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
-                    Account number {maskAccountNumber(account.accountNumber)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>
+                    <span>
+                      Account number{' '}
+                      <strong style={{ color: '#111827', fontFamily: revealedAccounts[account.id] ? 'monospace' : 'inherit' }}>
+                        {revealedAccounts[account.id] ? account.accountNumber : maskAccountNumber(account.accountNumber)}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleAccountReveal(account.id)}
+                      title={revealedAccounts[account.id] ? 'Hide account number' : 'View full account number'}
+                      aria-label={revealedAccounts[account.id] ? 'Hide account number' : 'View full account number'}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: '2px 4px',
+                        cursor: 'pointer',
+                        color: revealedAccounts[account.id] ? '#0D6E64' : '#6B7280',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '4px',
+                        lineHeight: 1
+                      }}
+                    >
+                      {revealedAccounts[account.id] ? (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      )}
+                    </button>
                   </div>
 
                   <div style={{ fontSize: '28px', fontWeight: 700, color: isClosed ? '#6B7280' : '#111827', marginBottom: '20px' }}>

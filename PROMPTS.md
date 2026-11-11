@@ -929,3 +929,63 @@ Strict constraints were enforced:
 - **Live End-to-End Verification**:
   - Live Admin API verified: customer6's request (`90f1fc34-a9c5-42b7-8081-3c3e7e96409c`, `PENDING`) confirmed visible and retrievable via authenticated session.
   - Live Password Change API verified: successfully executed password modification, verified authentication under the new credential, and restored credential.
+
+---
+
+## 21. 2026-11-11 - Extended Banking Controls, Governance & Full Documentation Synchronization
+
+### Prompt & Context
+Complete the implementation of Extended Banking Controls, correct database migration and least-privilege catalog constraints, verify regression test suites across all financial and security domains, and synchronize project documentation (`README.md`, `PROMPTS.md`, `THREATS.md`) with the actual working tree implementation.
+
+### Architectural Decisions & Implementation
+1. **Compensating Transaction Reversals & Double-Entry Accounting**:
+   - Designed compensating reversal workflows in `MakerCheckerService`:
+     - Original transaction is linked via `related_transaction_id`.
+     - Compensating ledger transaction is generated with reciprocal debit and credit entries.
+     - Status of original transaction transitions to `REVERSED`.
+   - Updated database constraint `ledger_transactions_status_chk` in Flyway migration `V14` to allow status `REVERSED`.
+   - Updated PostgreSQL trigger `prevent_completed_transaction_mutation()` in migration `V14` to permit status mutation strictly to `REVERSED` when `NEW.related_transaction_id IS NOT NULL`, preserving transaction immutability invariants.
+2. **Maker-Checker Dual-Authorization Workflow**:
+   - Implemented `MakerCheckerRequestEntity` and `maker_checker_requests` table with statuses `PENDING`, `APPROVED`, `REJECTED`.
+   - Enforced four-eyes governance principle: the administrator who initiates a transfer or reversal is prevented from approving or rejecting their own request (`initiator.getId().equals(reviewer.getId())` returns HTTP 400 Bad Request).
+   - Endpoints: `POST /api/v1/admin/maker-checker/transfer`, `POST /api/v1/admin/maker-checker/reversal`, `GET /api/v1/admin/maker-checker/requests`, and `POST /api/v1/admin/maker-checker/requests/{id}/review`.
+3. **Transaction Limits**:
+   - Implemented `TransactionLimitEntity` and `transaction_limits` table (`TransactionLimitService`).
+   - Validates maximum amount per transaction and rolling 24-hour total amount per account for withdrawals and transfers.
+   - Throws `TransactionLimitExceededException` (HTTP 422 Unprocessable Content) when exceeded.
+   - Administrative configuration via `GET /api/v1/admin/settings/limits` and `PUT /api/v1/admin/settings/limits`.
+4. **Customer Email Verification & Password Recovery**:
+   - Implemented `EmailVerificationTokenEntity` and `PasswordResetTokenEntity` with cryptographic tokens and expiration timestamps.
+   - Registration flow respects `vaultora.auth.email-verification-required`: when enabled, customers register in `PENDING_VERIFICATION` status and must verify via `POST /api/v1/auth/verify-email` before signing in. Admin and auditor users provisioned by administrators are pre-verified.
+   - Self-service password recovery via `POST /api/v1/auth/forgot-password` and `POST /api/v1/auth/reset-password`.
+   - Dedicated frontend pages: `VerifyEmailPage.tsx` (`/verify-email`), `ForgotPasswordPage.tsx` (`/forgot-password`), and `ResetPasswordPage.tsx` (`/reset-password`).
+5. **Statement Generation & Spreadsheet Formula Defense**:
+   - Implemented `StatementService`, `PdfStatementGenerator`, and `CsvStatementGenerator`.
+   - Generates binary PDF statements (`%PDF-1.4`) with tabular date, type, account numbers, and debit/credit amounts.
+   - Generates CSV statements and Auditor transaction exports with formula injection sanitization: prepends a single quote (`'`) to any field starting with `=`, `+`, `-`, `@`, `\t`, or `\r`.
+   - Modal component `DownloadStatementModal.tsx` supports date range filtering and format selection.
+6. **Auditor Transaction Reporting & Ledger Integrity Verification**:
+   - `AuditorInspectionService` provides multi-criteria transaction filtering (`startDate`, `endDate`, `userEmail`, `accountId`, `type`, `status`) and paginated inspection (`GET /api/v1/audit/transactions`).
+   - `GET /api/v1/audit/ledger-integrity` verifies:
+     - Global debit-credit equality across all entries (`sumAllDebits() == sumAllCredits()`).
+     - Detection of unbalanced individual transactions (`findUnbalancedTransactions()`).
+     - Account balance reconciliation: verifies stored account balance against calculated sum of debits and credits based on `normal_balance` (`CREDIT` vs `DEBIT`).
+     - Returns `status: "INTACT"` or `"COMPROMISED"`.
+7. **Database Privileges & Migration V14 Hardening**:
+   - Flyway migration `V14__extended_banking_controls_and_recovery.sql` creates tables with `VARCHAR(3)` currency columns matching JPA entities.
+   - Enforces strict least privilege on `ledgerline_runtime`: grants table-level `SELECT, INSERT` only on new tables; prohibits table-level `UPDATE`, `DELETE`, and `TRUNCATE`, preserving `Phase2FinancialEngineIntegrationTests` catalog invariants.
+8. **Explicit Scope Exclusions**:
+   - Reaffirmed that KYC and automated suspicious transaction detection heuristics are outside current scope.
+   - Customer email verification is strictly identity hygiene, not KYC.
+   - Stateless JWT is explicitly excluded in favor of Spring Security server-managed session cookies.
+
+### Verification Results
+- **Backend Integration Test Suite**:
+  - `Phase1IntegrationTests`: 31 tests passed (100%).
+  - `Phase2FinancialEngineIntegrationTests`: 56 tests passed (100%), including all 22 database security catalog tests.
+  - `ExtendedBankingControlsIntegrationTests`: 8 tests passed (100%).
+  - `RuntimeRoleApplicationIntegrationTest`: 8 tests passed (100%).
+  - Total backend passing tests: 104+ tests with zero failures and zero errors.
+- **Frontend Test Suite**:
+  - 37 tests passed across 8 test suites (`vitest run`).
+  - Production build: `tsc -b && vite build` built cleanly with zero errors.

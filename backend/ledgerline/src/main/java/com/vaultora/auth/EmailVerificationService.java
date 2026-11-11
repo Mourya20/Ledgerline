@@ -107,6 +107,13 @@ public class EmailVerificationService {
                         user.getId(),
                         Map.of("email", user.getEmail(), "ip", clientIp != null ? clientIp : "unknown")
                 );
+                return Map.of(
+                        "message", "Simulated verification token generated: " + rawToken,
+                        "token", rawToken,
+                        "link", "/verify-email?token=" + rawToken
+                );
+            } else if (user.isEmailVerified()) {
+                return Map.of("message", "This email address is already verified. You may sign in.");
             }
         }
 

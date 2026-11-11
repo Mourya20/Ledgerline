@@ -44,10 +44,11 @@ This document defines the engineering threat model for **Vaultora**, an immutabl
           ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TRUST BOUNDARY 4: POSTGRESQL 18 DATABASE AUTHORITY                     │
-│ - Schema DDL isolation (`ddl-auto=validate`, Flyway V1-V9 migrations)  │
-│ - Least-privilege runtime role (`ledgerline_runtime`, NOINHERIT)        │
+│ - Schema DDL isolation (`ddl-auto=validate`, Flyway V1-V14 migrations) │
+│ - Least-privilege runtime role (`ledgerline_runtime`, NOINHERIT)       │
 │   * No TRUNCATE or DELETE on any table                                 │
 │   * Column-level UPDATE restricted to status and timestamps            │
+│   * Procedure-mediated password and request mutations (SECURITY DEFINER)│
 │   * No CREATE on schema public                                         │
 │ - INSERT boundary guards: blocks ADMIN/AUDITOR roles & fake balances   │
 │ - Call-stack protected balance projection trigger (`PG_CONTEXT`)       │
@@ -57,6 +58,7 @@ This document defines the engineering threat model for **Vaultora**, an immutabl
 │ - Concurrency-safe row-level locking (`FOR UPDATE` on `accounts`)      │
 │ - Trigger-maintained balance projections (`apply_ledger_entry...`)     │
 │ - Append-only ledger entries (PostgreSQL trigger blocks UPDATE/DELETE) │
+│ - Compensating reversal invariant (`related_transaction_id` required)  │
 │ - Append-only audit log table (PostgreSQL trigger blocks UPDATE/DELETE)│
 │ - Deferred constraint triggers: zero-sum debits=credits at commit      │
 │ - Account non-negative & customer credit-normal policy constraints     │
@@ -1051,6 +1053,126 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 
 ---
 
+#### SEC-AUTH-007: Password-Reset & Email-Verification Token Hijacking / Replay
+- **Threat ID**: `SEC-AUTH-007`
+- **Name**: Lifecycle Abuse of Password Recovery and Verification Tokens
+- **Category**: Authentication & Account Security
+- **Severity**: High (Unauthorized account takeover, verification spoofing)
+- **Attack Scenario**: An attacker intercepts or guesses recovery/verification tokens, attempts to reuse already-consumed tokens, or presents expired tokens to reset user passwords or mark accounts as verified.
+- **Mitigation Strategy**: Cryptographically strong 256-bit random hex tokens (`UUID.randomUUID()` sanitized or CSPRNG generated), single-use consumption (`used = true` checked and updated atomically), strict timestamp-based expiration (`expires_at` checked on retrieval), and invalidated prior tokens on subsequent generation.
+- **Implementation Evidence**: `PasswordRecoveryService.java`, `EmailVerificationService.java`, `PasswordResetTokenEntity.java`, `EmailVerificationTokenEntity.java`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testCustomerRegistrationAndEmailVerification()`, `ExtendedBankingControlsIntegrationTests.testPasswordResetFlow()`
+- **Status**: MITIGATED
+- **Residual Risk**: Secure transport (TLS) must be enforced in production to protect email dispatch links.
+
+---
+
+#### SEC-AUTH-008: Account Enumeration via Forgot-Password / Verification
+- **Threat ID**: `SEC-AUTH-008`
+- **Name**: User Account Enumeration via Forgot-Password Endpoint
+- **Category**: Authentication & Account Security
+- **Severity**: Medium (User reconnaissance, targeting)
+- **Attack Scenario**: An attacker submits candidate email addresses to `/api/v1/auth/forgot-password` or `/api/v1/auth/resend-verification` and compares HTTP status codes or response bodies to determine which addresses represent registered users.
+- **Mitigation Strategy**: Uniform generic responses returned regardless of whether the email address exists in the system ("If an account with that email exists, instructions have been sent"). No user existence confirmation is leaked to unauthenticated callers.
+- **Implementation Evidence**: `AuthController.forgotPassword()`, `AuthController.resendVerification()`
+- **Verification**: Integration test assertions on uniform response payloads.
+- **Status**: MITIGATED
+- **Residual Risk**: Timing attacks at the millisecond scale could theoretically infer DB query execution; constant-time simulation can be added at edge gateways.
+
+---
+
+#### SEC-FIN-010: Transaction Limit Bypass & Splitting
+- **Threat ID**: `SEC-FIN-010`
+- **Name**: Per-Transaction and Daily Velocity Limit Circumvention
+- **Category**: Financial Controls
+- **Severity**: High (Unauthorized capital flight, policy violation)
+- **Attack Scenario**: A malicious actor or compromised credential initiates rapid sequential transfers or withdrawals to drain accounts beyond approved regulatory or operational limits.
+- **Mitigation Strategy**: `TransactionLimitService` enforces per-transaction ceilings and rolling 24-hour aggregate transaction limits calculated within the active database transaction after acquiring row-level locks on the source account. If limits are exceeded, `TransactionLimitExceededException` (HTTP 422) is thrown and the transaction aborts before ledger entry creation.
+- **Implementation Evidence**: `TransactionLimitService.java`, `TransactionService.java`, `MakerCheckerService.java`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testTransactionLimitsExceeded()`
+- **Status**: MITIGATED
+- **Residual Risk**: Limits apply per account; bank-wide global caps across all customer accounts can be extended in future releases.
+
+---
+
+#### SEC-FIN-011: Maker-Checker Dual-Authorization Bypass & Self-Approval
+- **Threat ID**: `SEC-FIN-011`
+- **Name**: Four-Eyes Principle Circumvention in Administrative Operations
+- **Category**: Financial Controls / Authorization
+- **Severity**: Critical (Rogue administrator unauthorized money movement)
+- **Attack Scenario**: A single administrator initiates a large administrative transfer or transaction reversal and immediately attempts to approve their own request to bypass governance oversight.
+- **Mitigation Strategy**: The Maker-Checker engine strictly compares the request initiator ID against the approving administrator's authenticated ID (`request.getInitiatedByUser().getId().equals(reviewer.getId())`). Self-approval attempts are rejected with HTTP 400 Bad Request. Requests can only be reviewed once (`status == PENDING`).
+- **Implementation Evidence**: `MakerCheckerService.java` (reviewRequest), `MakerCheckerController.java`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testMakerCheckerDualAuthorizationEnforcesFourEyes()`
+- **Status**: MITIGATED
+- **Residual Risk**: Collusion between two rogue administrators with `ADMIN` role is outside single-node software enforcement and requires institutional oversight and audit inspection.
+
+---
+
+#### SEC-FIN-012: Unauthorized or Duplicate Transaction Reversal
+- **Threat ID**: `SEC-FIN-012`
+- **Name**: Arbitrary or Duplicate Reversal of Completed Ledger Transactions
+- **Category**: Financial Controls
+- **Severity**: Critical (Unbalanced general ledger, duplicate fund restoration)
+- **Attack Scenario**: An attacker attempts to reverse an arbitrary transaction without authorization, reverse an already-reversed transaction (duplicating refund credit), or directly mutate the `status` column of a transaction to `REVERSED`.
+- **Mitigation Strategy**:
+  1. Reversals must be initiated through the maker-checker dual-authorization pipeline.
+  2. Original transaction status must strictly be `COMPLETED`.
+  3. A compensating double-entry transaction is created with inverted debits and credits, setting `related_transaction_id` pointing to the original transaction.
+  4. PostgreSQL trigger `prevent_completed_transaction_mutation()` strictly forbids changing a completed transaction's status unless transitioning to `REVERSED` with `NEW.related_transaction_id IS NOT NULL`.
+- **Implementation Evidence**: `MakerCheckerService.java`, `V14__extended_banking_controls_and_recovery.sql`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testCompensatingTransactionReversal()`
+- **Status**: MITIGATED
+- **Residual Risk**: None on ledger invariants; double-entry integrity is preserved.
+
+---
+
+#### SEC-EXP-001: CSV Spreadsheet Formula Injection (CSV Injection)
+- **Threat ID**: `SEC-EXP-001`
+- **Name**: Formula Injection via Statement and Audit CSV Exports
+- **Category**: Data Security / Client Exploitation
+- **Severity**: Medium (Client-side execution in Microsoft Excel / LibreOffice)
+- **Attack Scenario**: A customer or malicious actor embeds formula triggers (e.g. `=cmd|' /C calc'!A0` or `@SUM(...)`) into transaction descriptions, recipient account names, or metadata. When an auditor or customer opens the exported CSV file in spreadsheet software, the formula executes arbitrary commands or exfiltrates data.
+- **Mitigation Strategy**: `CsvStatementGenerator` and `AuditorInspectionService` apply automated formula sanitization across all CSV output columns. Any text field beginning with `=`, `+`, `-`, `@`, `\t`, or `\r` has a single quote (`'`) prepended to force interpretation as a literal text string rather than an executable formula.
+- **Implementation Evidence**: `CsvStatementGenerator.java`, `AuditorInspectionService.java`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testAuditorInspectionAndCsvExport()`
+- **Status**: MITIGATED
+- **Residual Risk**: None for spreadsheet exports.
+
+---
+
+#### SEC-AUDIT-005: Undetected Accounting Inconsistencies & Ledger Corruption
+- **Threat ID**: `SEC-AUDIT-005`
+- **Name**: Undetected Ledger Discrepancies and Balance Drift
+- **Category**: Financial Integrity / Auditing
+- **Severity**: Critical (Silent financial imbalance, accounting corruption)
+- **Attack Scenario**: A theoretical hardware fault, unauthorized database mutation by a superuser, or concurrent anomaly causes account balances to drift away from the mathematical sum of their ledger entries, or creates an unbalanced transaction.
+- **Mitigation Strategy**: The Auditor Ledger Integrity Verification engine (`GET /api/v1/audit/ledger-integrity`) executes live mathematical verification:
+  1. Computes total global debits vs total global credits across all ledger entries (`sumAllDebits() == sumAllCredits()`).
+  2. Identifies any transaction where debits do not equal credits (`findUnbalancedTransactions()`).
+  3. Reconciles every stored account balance against its calculated balance from ledger entries according to its `normal_balance` policy (`CREDIT` vs `DEBIT`).
+  4. Flags status as `INTACT` or `COMPROMISED` with granular discrepancy reporting.
+- **Implementation Evidence**: `AuditorInspectionService.java`, `AuditController.java`
+- **Verification**: `ExtendedBankingControlsIntegrationTests.testAuditorLedgerIntegrity()`
+- **Status**: MITIGATED
+- **Residual Risk**: None.
+
+---
+
+#### SEC-DB-010: Runtime Database Privilege Escalation on Extended Controls
+- **Threat ID**: `SEC-DB-010`
+- **Name**: Unauthorized Direct Modification of Token and Limit Tables
+- **Category**: Database Security
+- **Severity**: Critical (Circumvention of financial limits, authentication bypass)
+- **Attack Scenario**: If the application runtime database role (`ledgerline_runtime`) possesses table-level `UPDATE` or `DELETE` on `transaction_limits`, `maker_checker_requests`, or recovery token tables, a SQL injection or compromised query could alter limit values or manipulate approval records directly.
+- **Mitigation Strategy**: Flyway migration `V14` restricts `ledgerline_runtime` strictly to table-level `SELECT` and `INSERT` grants on `maker_checker_requests`, `transaction_limits`, `email_verification_tokens`, and `password_reset_tokens`. Table-level `UPDATE`, `DELETE`, and `TRUNCATE` are prohibited. Updates occur through security definer routines or controlled application procedures.
+- **Implementation Evidence**: `V14__extended_banking_controls_and_recovery.sql`, `scripts/provision-production-runtime-role.sql`
+- **Verification**: `Phase2FinancialEngineIntegrationTests.runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert()`
+- **Status**: MITIGATED
+- **Residual Risk**: Migration administrator (`ledgerline_app`) credentials must remain secured in environment variables.
+
+---
+
 ## 3. Threat-to-Control Traceability Matrix
 
 | Threat ID | Name | Category | Severity | Status | Mitigating Component | Test Verification |
@@ -1105,6 +1227,14 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 | `SEC-AUTHZ-008` | Password Assignment & Auditor Provisioning Privilege Escalation | Authorization | High | MITIGATED | Security Definer Procedures, Strict Role Guarding, Non-Admin Boundary | `adminCanAssignPasswordToCustomer`, `adminCanOpenAccountForNonExistingAuditorWithAssignedRole` |
 | `SEC-AUTHZ-009` | Account Opening Request Approval Bypass | Authorization | High | MITIGATED | Mandatory Admin Review Lifecycle, Single Pending Constraint, Database Procedure | `adminCanApproveAccountRequest`, `auditorCanViewRequestsButCannotApprove` |
 | `SEC-AUTHZ-010` | Unauthorized Password Mutation & Catalog Privilege Invariant | Authorization / Crypto | High | MITIGATED | Current Password Verification, Difference Check, SECURITY DEFINER `change_user_password` | `customerCanChangePassword`, `auditorAndAdminCanChangePassword` |
+| `SEC-AUTH-007` | Password-Reset & Email-Verification Token Hijacking | Authentication | High | MITIGATED | CSPRNG 256-bit single-use tokens, timestamp expiration, atomic consumption | `testCustomerRegistrationAndEmailVerification`, `testPasswordResetFlow` |
+| `SEC-AUTH-008` | Account Enumeration via Forgot-Password / Verification | Authentication | Medium | MITIGATED | Uniform generic responses for registered/unregistered email addresses | Verified uniform API response payloads |
+| `SEC-FIN-010` | Transaction Limit Bypass & Splitting | Financial | High | MITIGATED | `TransactionLimitService` per-tx and rolling 24h checks within row-locked transaction | `testTransactionLimitsExceeded` |
+| `SEC-FIN-011` | Maker-Checker Self-Approval Bypass | Financial / AuthZ | Critical | MITIGATED | Strict comparison of initiator vs reviewer IDs in `MakerCheckerService` | `testMakerCheckerDualAuthorizationEnforcesFourEyes` |
+| `SEC-FIN-012` | Unauthorized or Duplicate Transaction Reversal | Financial | Critical | MITIGATED | Compensating double-entry ledger entries, `related_transaction_id`, V14 trigger | `testCompensatingTransactionReversal` |
+| `SEC-EXP-001` | CSV Spreadsheet Formula Injection | Data Security | Medium | MITIGATED | Automated sanitization prepending single quotes to formula prefix characters | `testAuditorInspectionAndCsvExport` |
+| `SEC-AUDIT-005` | Undetected Accounting Inconsistencies & Balance Drift | Financial Integrity | Critical | MITIGATED | `AuditorInspectionService` global debits/credits sum, unbalanced tx detection, balance reconciliation | `testAuditorLedgerIntegrity` |
+| `SEC-DB-010` | Extended Controls Tables Least-Privilege Invariant | Database | Critical | MITIGATED | V14 table grants restricted to `SELECT, INSERT` only for `ledgerline_runtime` | `runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert` |
 
 ---
 

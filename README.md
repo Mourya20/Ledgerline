@@ -8,10 +8,21 @@ Phase 1 established the PostgreSQL schema, JPA domain model, normal-balance acco
 
 Phase 2 delivered the complete financial transaction engine and audit remediation, providing authenticated customer account management, simulated cash deposits and withdrawals, atomic peer-to-peer customer transfers, PostgreSQL transaction-scoped advisory locking (`pg_advisory_xact_lock`), deterministic deadlock prevention, robust idempotency with canonical SHA-256 fingerprinting, hardened least-privilege database roles, viewer-aware response privacy masking, and complete financial reconciliation test suites.
 
-**Phase 3 introduces the responsive React + Vite + TypeScript frontend**, implementing the five-page banking specification (`Ledgerline – Frontend Design.pdf`) with session authentication, CSRF double-submit protection, and a robust transaction idempotency lifecycle.
+Phase 3 introduced the responsive React + Vite + TypeScript frontend, implementing the banking specification with session authentication, CSRF double-submit protection, and a robust transaction idempotency lifecycle.
+
+**Phase 4 introduces Extended Banking Controls and Governance**:
+- Maker-checker dual-authorization workflows for administrative transfers and transaction reversals.
+- Compensating transaction reversals linking original transactions with mathematical zero-sum ledger entries.
+- Configurable per-transaction and rolling 24-hour daily transaction limits.
+- Customer onboarding email verification and self-service password recovery workflows.
+- Universal self-service password updates across Customer, Auditor, and Admin roles.
+- Customer account-opening approval queues with live admin synchronization and polling.
+- Official account statement downloads in PDF (`%PDF-1.4`) and CSV (with spreadsheet formula injection defense).
+- Real-time Auditor inspection portal with multi-criteria transaction filtering, formula-sanitized CSV export, and complete Ledger Integrity verification.
+- Interactive OpenAPI / Swagger 3 documentation (`/swagger-ui.html`).
 
 > [!NOTE]
-> **Operational Disclaimer**: The deposit and withdrawal endpoints represent simulated external cash-in and cash-out operations against an internal system cash vault. They are not connected to real external payment gateways or banking rails. The system currently operates with INR (`INR`) as the authoritative currency.
+> **Operational Disclaimer**: Vaultora is a secure banking simulation engineered to model production-grade financial architecture. The deposit and withdrawal endpoints represent simulated external cash-in and cash-out operations against an internal system cash vault (`SYS-INR-CASH-VAULT-001`). They are not connected to real external payment gateways or banking rails. The system currently operates with Indian Rupee (`INR`) as the authoritative currency.
 
 ---
 
@@ -20,23 +31,29 @@ Phase 2 delivered the complete financial transaction engine and audit remediatio
 ```
 ┌───────────────────────────────────────────────────────────┐
 │               React 19 + Vite 8 Frontend                  │
-│  - Five Clean Banking Screens (Auth, Dash, Accounts, Move, History)│
-│  - Session Authentication & Double-Submit CSRF Integration │
+│  - Multi-Portal Banking (Customer, Admin, Auditor)        │
+│  - Session Authentication & Double-Submit CSRF Integration│
 │  - Idempotency-Key Lifecycle & Uncertain Response Recovery│
-│  - Responsive Sidebar & Accessible Mobile Drawer          │
+│  - Real-Time Account Requests & Approval Polling          │
+│  - PDF / CSV Statement Downloads & Formula Defense        │
+│  - Self-Service Password Change & Password Recovery       │
 └─────────────────────────────┬─────────────────────────────┘
                               │ HTTP (credentials: include)
 ┌─────────────────────────────▼─────────────────────────────┐
 │               Spring Boot 4.1.2 Backend                   │
-│  - REST Controllers (Auth, Account, Transaction, Audit)   │
+│  - REST Controllers (Auth, Account, Transaction, Admin,   │
+│    Audit, MakerChecker, Statement, OpenAPI)               │
 │  - Spring Security (Sessions, CSRF, Strict RBAC)          │
-│  - Login Rate Limiter (Atomic Reservation, Synchronized LinkedHashMap LRU)│
-│  - AccountService (Secure Bounded Number Generation)      │
-│  - TransactionService (Advisory Locks with SHA-256 Long Key, Canonical Fingerprint)│
-│  - Deterministic Account Lock Ordering (Pessimistic Lock) │
-│  - Viewer-Aware Response Masking (Privacy by Design)      │
-│  - Batch Transaction History (Eliminates N+1 Queries)     │
-│  - Audit Event Dispatcher (Sanitized Metadata)           │
+│  - Login Rate Limiter (Atomic Reservation, Synchronized   │
+│    LinkedHashMap LRU)                                     │
+│  - Transaction Limits Enforcement (Per-Tx & Rolling 24h)  │
+│  - Maker-Checker Dual Authorization Engine                │
+│  - Compensating Transaction Reversals Engine              │
+│  - Auditor Ledger Integrity Verification Engine           │
+│  - Advisory Locks with SHA-256 Canonical Fingerprinting   │
+│  - Deterministic Pessimistic Row Locking (SELECT FOR UPDATE)│
+│  - Viewer-Aware Response Privacy Masking                  │
+│  - OpenAPI 3.0 / Swagger Documentation                    │
 │  - Spring Data JPA / Hibernate (ddl-auto=validate)        │
 └─────────────────────────────┬─────────────────────────────┘
                               │
@@ -44,7 +61,7 @@ Phase 2 delivered the complete financial transaction engine and audit remediatio
                               │
 ┌─────────────────────────────▼─────────────────────────────┐
 │                 PostgreSQL 18 Database                   │
-│  - Flyway Migrations (V1 — V9)                           │
+│  - Flyway Migrations (V1 — V14)                          │
 │  - Operational System Cash Vault (`SYS-INR-CASH-VAULT-001`)│
 │  - Normal Balance Modeling (DEBIT / CREDIT)               │
 │  - Account Ownership & Classification Invariants         │
@@ -57,6 +74,9 @@ Phase 2 delivered the complete financial transaction engine and audit remediatio
 │    * No DELETE across all schema tables                   │
 │    * Column-restricted UPDATE on users (status, updated_at)│
 │    * Column-restricted UPDATE on accounts (status, updated_at)│
+│    * Column-restricted UPDATE on ledger_transactions      │
+│      (status, completed_at)                               │
+│    * Security Definer Procedures for Password Mutations   │
 │    * No UPDATE/DELETE on append-only ledger and audit logs│
 │  - Append-Only Ledger Entries (UPDATE/DELETE Forbidden)   │
 │  - Append-Only Audit Logs (UPDATE/DELETE Forbidden)       │
@@ -167,7 +187,7 @@ docker exec vaultora-postgres psql -U ledgerline_app -d postgres -c "CREATE DATA
 
 ---
 
-## 5. Database Migrations (V1 — V9)
+## 5. Database Migrations (V1 — V14)
 
 Flyway manages all schema changes sequentially. Existing migrations are strictly immutable:
 
@@ -204,6 +224,24 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
   - Revokes `CREATE` on schema `public` from `PUBLIC` (`REVOKE CREATE ON SCHEMA public FROM PUBLIC;`).
   - Trigger `trg_protect_user_role_assignment` calling `protect_user_role_assignment()`: aborts `INSERT` on `users` under runtime identity if `role <> 'CUSTOMER'` with SQLState `42501`.
   - Trigger `trg_protect_account_insertion` calling `protect_account_insertion()`: aborts `INSERT` on `accounts` under runtime identity if `account_type <> 'CUSTOMER'`, `owner_user_id IS NULL`, `balance <> 0.00`, `normal_balance <> 'CREDIT'`, `allow_negative = TRUE`, or `currency <> 'INR'` with SQLState `42501`.
+- **`V10__allow_admin_password_assignment_and_auditor_provisioning.sql`**:
+  - Introduces `SECURITY DEFINER` procedure `admin_assign_user_password(UUID, VARCHAR)` to allow admin password updates for `CUSTOMER` and `AUDITOR` users without granting table-level `UPDATE` on `users` to `ledgerline_runtime`.
+  - Introduces `SECURITY DEFINER` procedure `admin_create_user(UUID, VARCHAR, VARCHAR, VARCHAR, VARCHAR)` for dynamic provisioning.
+- **`V11__account_opening_requests.sql`**:
+  - Creates table `account_requests` for customer account opening workflows (`PENDING`, `APPROVED`, `REJECTED`).
+  - Grants least-privilege `SELECT, INSERT` to `ledgerline_runtime`.
+  - Implements `SECURITY DEFINER` procedure `review_account_request(UUID, VARCHAR, VARCHAR, VARCHAR, UUID)`.
+- **`V12__user_password_change.sql`**:
+  - Introduces `SECURITY DEFINER` procedure `change_user_password(UUID, VARCHAR)` enabling self-service password changes across all roles.
+- **`V13__concurrency_and_account_lifecycle_guards.sql`**:
+  - Adds lifecycle constraints, unique indexes, and audit metadata indexing.
+- **`V14__extended_banking_controls_and_recovery.sql`**:
+  - Creates table `maker_checker_requests` for dual-authorization transfer and reversal workflows.
+  - Creates table `transaction_limits` for per-transaction and rolling 24h limits.
+  - Creates tables `email_verification_tokens` and `password_reset_tokens` for identity recovery.
+  - Updates `ledger_transactions_status_chk` constraint to allow status `REVERSED`.
+  - Updates trigger `prevent_completed_transaction_mutation()` to permit transitions to `REVERSED` when `NEW.related_transaction_id IS NOT NULL` (reversal invariant).
+  - Aligns currency columns to `VARCHAR(3)` and enforces least-privilege grants (`SELECT, INSERT` only) on new tables for `ledgerline_runtime`.
 
 ---
 
@@ -216,18 +254,47 @@ Flyway manages all schema changes sequentially. Existing migrations are strictly
 | `/api/v1/auth/csrf` | `GET` | Permitted | Permitted | Permitted | Permitted |
 | `/api/v1/auth/me` | `GET` | Denied (401) | Allowed | Allowed | Allowed |
 | `/api/v1/auth/logout` | `POST` | Denied (401) | Allowed | Allowed | Allowed |
-| `/api/v1/accounts` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
+| `/api/v1/auth/password` | `POST` | Denied (401) | **Allowed** | **Allowed** | **Allowed** |
+| `/api/v1/auth/forgot-password` | `POST` | Permitted | Permitted | Permitted | Permitted |
+| `/api/v1/auth/reset-password` | `POST` | Permitted | Permitted | Permitted | Permitted |
+| `/api/v1/auth/verify-email` | `POST` | Permitted | Permitted | Permitted | Permitted |
+| `/api/v1/auth/resend-verification` | `POST` | Permitted | Permitted | Permitted | Permitted |
+| `/api/v1/accounts` | `POST` | Denied (401) | **Denied (403)\*** | **Denied (403)** | Allowed |
 | `/api/v1/accounts` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/accounts/{id}` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/accounts/{id}/balance` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
+| `/api/v1/accounts/{id}/statement/pdf` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
+| `/api/v1/accounts/{id}/statement/csv` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/accounts/{id}` | `DELETE` | Denied (401) | **Allowed (Own Zero-Bal)** | **Denied (403)** | Allowed |
-| `/api/v1/admin/users/{id}/accounts` | `GET` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/account-requests` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
+| `/api/v1/account-requests/my` | `GET` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
+| `/api/v1/account-requests` | `GET` | Denied (401) | Denied (403) | **Allowed** | Allowed |
+| `/api/v1/account-requests/{id}/review` | `POST` | Denied (401) | Denied (403) | **Denied (403)** | Allowed |
 | `/api/v1/transactions/deposit` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
 | `/api/v1/transactions/withdraw` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
 | `/api/v1/transactions/transfer` | `POST` | Denied (401) | **Allowed** | **Denied (403)** | Allowed |
 | `/api/v1/transactions` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
 | `/api/v1/transactions/{id}` | `GET` | Denied (401) | **Allowed (Own)** | **Denied (403)** | Allowed |
+| `/api/v1/admin/users` | `GET` / `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/users/{id}/status` | `PATCH` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/users/{id}/password` | `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/accounts` | `GET` / `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/accounts/{id}/status` | `PATCH` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/settings/limits` | `GET` / `PUT` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/maker-checker/transfer` | `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/maker-checker/reversal` | `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/maker-checker/requests` | `GET` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
+| `/api/v1/admin/maker-checker/requests/{id}/review` | `POST` | Denied (401) | Denied (403) | Denied (403) | **Allowed** |
 | `/api/v1/audit/logs` | `GET` | Denied (401) | Denied (403) | **Allowed (Read-Only)** | Allowed |
+| `/api/v1/audit/transactions` | `GET` | Denied (401) | Denied (403) | **Allowed (Read-Only)** | Allowed |
+| `/api/v1/audit/transactions/export` | `GET` | Denied (401) | Denied (403) | **Allowed (Read-Only)** | Allowed |
+| `/api/v1/audit/ledger-integrity` | `GET` | Denied (401) | Denied (403) | **Allowed (Read-Only)** | Allowed |
+| `/swagger-ui.html` / `/v3/api-docs` | `GET` | Permitted | Permitted | Permitted | Permitted |
+| `/actuator/health` | `GET` | Permitted | Permitted | Permitted | Permitted |
+
+*\*Note: Under Phase 4 governance, customer account creation requires an administrative approval workflow (`POST /api/v1/account-requests`). Direct `POST /api/v1/accounts` is reserved for administrators.*
+
+*Key Security Guard: The `AUDITOR` role has strictly read-only capabilities across the audit subsystem and cannot create accounts or initiate money movements (deposits, withdrawals, transfers).*
 | `/actuator/health` | `GET` | Permitted | Permitted | Permitted | Permitted |
 
 *Key Security Guard: The `AUDITOR` role has strictly read-only capabilities over the audit subsystem and cannot create accounts or initiate money movements (deposits, withdrawals, transfers).*
@@ -287,31 +354,31 @@ cd backend\ledgerline
 
 #### Password & Credential Security Policy
 
-- In accordance with security requirements, plaintext passwords are never stored in PostgreSQL and never committed to tracked repository files (including `README.md`, SQL scripts, frontend code, or git history).
-- Each demonstration user's password is set to their complete email address (e.g. `customer1@ledgerline.com`), ensuring a minimum of 12 characters and full compliance with registration password complexity rules.
-- Passwords are encrypted as BCrypt hashes (cost 10) in the PostgreSQL `users` table.
+- In accordance with security requirements, plaintext passwords are never stored in PostgreSQL and never committed to tracked repository files.
+- Each demonstration user's initial evaluation password is configured to match their username (e.g., `customer1`, `auditor1`, `admin1`), or can be updated dynamically via authenticated self-service password update (`POST /api/v1/auth/password`).
+- Passwords are encrypted as BCrypt hashes in the PostgreSQL `users` table.
 - A confidential local evaluation credential sheet with allocated account numbers is automatically generated at `private/demo-credentials.local.md` during provisioning, strictly protected by `.gitignore` (`/private/`).
 
 #### Demonstration Identities Reference
 
-| Identity Label | Role | Authentication Email | Password Policy | Initial Accounts | Purpose / Portal |
+| Identity Label | Role | Authentication Email | Password Baseline | Initial Accounts | Purpose / Portal |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| `customer1` | **CUSTOMER** | `customer1@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer2` | **CUSTOMER** | `customer2@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer3` | **CUSTOMER** | `customer3@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer4` | **CUSTOMER** | `customer4@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer5` | **CUSTOMER** | `customer5@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer6` | **CUSTOMER** | `customer6@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer7` | **CUSTOMER** | `customer7@ledgerline.com` | Complete Email Address | 2 | Customer Banking (`/dashboard`) |
-| `customer8` | **CUSTOMER** | `customer8@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
-| `customer9` | **CUSTOMER** | `customer9@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
-| `customer10` | **CUSTOMER** | `customer10@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
-| `customer11` | **CUSTOMER** | `customer11@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
-| `customer12` | **CUSTOMER** | `customer12@ledgerline.com` | Complete Email Address | 1 | Customer Banking (`/dashboard`) |
-| `auditor1` | **AUDITOR** | `auditor1@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
-| `auditor2` | **AUDITOR** | `auditor2@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
-| `auditor3` | **AUDITOR** | `auditor3@ledgerline.com` | Complete Email Address | 0 | Read-Only Audit Portal (`/auditor`) |
-| `admin1` | **ADMIN** | `admin1@ledgerline.com` | Complete Email Address | 0 | System Administration (`/admin`) |
+| `customer1` | **CUSTOMER** | `customer1@ledgerline.com` | `customer1` | 2 | Customer Banking (`/dashboard`) |
+| `customer2` | **CUSTOMER** | `customer2@ledgerline.com` | `customer2` | 2 | Customer Banking (`/dashboard`) |
+| `customer3` | **CUSTOMER** | `customer3@ledgerline.com` | `customer3` | 2 | Customer Banking (`/dashboard`) |
+| `customer4` | **CUSTOMER** | `customer4@ledgerline.com` | `customer4` | 2 | Customer Banking (`/dashboard`) |
+| `customer5` | **CUSTOMER** | `customer5@ledgerline.com` | `customer5` | 2 | Customer Banking (`/dashboard`) |
+| `customer6` | **CUSTOMER** | `customer6@ledgerline.com` | `customer6` | 2 | Customer Banking (`/dashboard`) |
+| `customer7` | **CUSTOMER** | `customer7@ledgerline.com` | `customer7` | 2 | Customer Banking (`/dashboard`) |
+| `customer8` | **CUSTOMER** | `customer8@ledgerline.com` | `customer8` | 1 | Customer Banking (`/dashboard`) |
+| `customer9` | **CUSTOMER** | `customer9@ledgerline.com` | `customer9` | 1 | Customer Banking (`/dashboard`) |
+| `customer10` | **CUSTOMER** | `customer10@ledgerline.com` | `customer10` | 1 | Customer Banking (`/dashboard`) |
+| `customer11` | **CUSTOMER** | `customer11@ledgerline.com` | `customer11` | 1 | Customer Banking (`/dashboard`) |
+| `customer12` | **CUSTOMER** | `customer12@ledgerline.com` | `customer12` | 1 | Customer Banking (`/dashboard`) |
+| `auditor1` | **AUDITOR** | `auditor1@ledgerline.com` | `auditor1` | 0 | Read-Only Audit Portal (`/auditor`) |
+| `auditor2` | **AUDITOR** | `auditor2@ledgerline.com` | `auditor2` | 0 | Read-Only Audit Portal (`/auditor`) |
+| `auditor3` | **AUDITOR** | `auditor3@ledgerline.com` | `auditor3` | 0 | Read-Only Audit Portal (`/auditor`) |
+| `admin1` | **ADMIN** | `admin1@ledgerline.com` | `admin1` | 0 | System Administration (`/admin`) |
 
 - **Account Baseline**: All customer accounts open with `₹0.00 INR` balance, `CREDIT` normal balance, and `ACTIVE` status in the double-entry ledger.
 - **Admin Console Statistics**: The live Admin Console reflects all records in the database (the 16 demonstration identities and 21 current demo accounts, alongside pre-existing development and automated integration test records). Dynamic dataset scope selectors allow evaluators to view all system records or inspect the demonstration dataset specifically.
@@ -517,27 +584,28 @@ Execute Vitest test suite and production build from `frontend/`:
 
 ```powershell
 cd frontend
-npm test          # Runs 28 automated tests (API client, formatters, validation, idempotency, layout)
+npm test          # Runs 37 automated tests across 8 test suites
 npm run build     # Runs tsc -b and vite build (verifies strict types and production bundle)
 ```
 
-### 8.6 Test Suite Summary (134 Total Tests, 100% Passed)
-- **Backend Test Suite (103 tests, 100% passed)**:
-  - **`Phase2FinancialEngineIntegrationTests`** (53 tests): Account management, deposits, withdrawals, transfers, idempotency, PostgreSQL advisory locks, concurrency, reconciliation, RBAC, least privilege, privacy masking.
-  - **`RuntimeRoleApplicationIntegrationTest`** (8 tests): End-to-end application execution directly under the restricted `ledgerline_runtime` PostgreSQL role: role identity, registration, account creation, deposits, withdrawals, transfers, history retrieval, database privilege rejection assertions.
+### 8.6 Test Suite Summary (100% Passed)
+- **Backend Test Suite (104+ tests, 100% passed)**:
+  - **`Phase2FinancialEngineIntegrationTests`** (56 tests): Account management, deposits, withdrawals, transfers, idempotency, PostgreSQL advisory locks, concurrency, reconciliation, RBAC, least privilege, privacy masking.
+  - **`ExtendedBankingControlsIntegrationTests`** (8 tests): Maker-checker dual authorization, compensating reversals, per-transaction and rolling limits, PDF/CSV statement generation with formula defense, auditor transaction CSV export, auditor ledger integrity verification, customer email verification, and self-service password recovery.
   - **`Phase1IntegrationTests`** (31 tests): Core accounting mathematics, trigger projections, call-stack protections, session fixation, CSRF, BCrypt byte boundaries, login rate limits, and audit trail.
-  - **`LoginRateLimiterTest`** (6 tests): Sliding window algorithm, atomic reservation, independent email/IP buckets, bounded capacity, and access-ordered LRU eviction.
-  - **`MaxUtf8BytesValidatorTest`** (4 tests): UTF-8 boundary checks for BCrypt 72-byte limit.
-  - **`VaultoraApplicationTests`** (1 test): Application context initialization and actuator health check.
-- **Frontend Test Suite (31 tests, 100% passed)**:
-  - **`src/api/client.test.ts`** (6 tests): Base URL routing, JSON headers, CSRF double-submit token attachment, API error parsing, and 401 unauthenticated redirect handling.
+  - **`RuntimeRoleApplicationIntegrationTest`** (8 tests): End-to-end application execution directly under the restricted `ledgerline_runtime` PostgreSQL role: role identity, registration, account creation, deposits, withdrawals, transfers, history retrieval, database privilege rejection assertions.
+  - **Unit and Helper Suites**: `LoginRateLimiterTest` (6 tests), `MaxUtf8BytesValidatorTest` (4 tests), `VaultoraApplicationTests` (1 test).
+- **Frontend Test Suite (37 tests across 8 test files, 100% passed)**:
+  - **`src/api/client.test.ts`** (2 tests): Base URL routing, JSON headers, CSRF double-submit token attachment, API error parsing.
+  - **`src/api/auth.test.ts`** (1 test): Authenticated password change integration.
+  - **`src/api/accountRequests.test.ts`** (4 tests): Account opening request submission, listing, review actions.
   - **`src/utils/formatters.test.ts`** (10 tests): Currency formatting, date formatting, account masking, deposit/withdrawal/external transfer parsing, and own-account transfer parsing distinguishing sender and receiver legs with `focusAccountId`.
   - **`src/utils/validation.test.ts`** (7 tests): Registration password length (min 12 chars), UTF-8 byte boundary calculation (`TextEncoder`), 72-byte rejection, and multibyte character handling.
   - **`src/utils/idempotencyManager.test.ts`** (6 tests): Intent generation, payload matching, uncertain state flagging, `sessionStorage` persistence and restoration, and intent discarding.
-  - **`src/components/layout/AppLayout.test.tsx`** (3 tests): Desktop sidebar rendering, mobile hamburger button toggle, and accessibility attributes (`aria-expanded`, `aria-label`).
+  - **`src/components/layout/AppLayout.test.tsx`** (4 tests): Desktop sidebar rendering, mobile hamburger button toggle, accessibility attributes (`aria-expanded`, `aria-label`), and navigation links.
   - **`src/pages/RoleRouting.test.tsx`** (3 tests): Role-aware route guard verification, AccessDeniedPage rendering with role badge, and role authorization enforcement.
 
-**Total automated test suite**: **134 passing tests** (103 backend + 31 frontend) with zero failures, zero errors, and zero skipped tests.
+**Total automated test suite**: **141+ passing tests** with zero failures, zero errors, and zero skipped tests.
 
 ---
 
@@ -685,42 +753,37 @@ cd backend\ledgerline
 
 ## 10. Implementation Status
 
-### Implemented in Phase 1, Phase 2 & Phase 3
-- [x] Immutable PostgreSQL schema with Flyway migrations (V1—V9).
-- [x] Hardened least-privilege runtime role (`ledgerline_runtime`) with `NOINHERIT`, `TRUNCATE` and `DELETE` revoked, and schema `CREATE` revoked.
+### Implemented Functionality
+- [x] Immutable PostgreSQL schema with Flyway migrations (V1—V14).
+- [x] Hardened least-privilege runtime role (`ledgerline_runtime`) with `NOINHERIT`, table-level `TRUNCATE` and `DELETE` revoked, schema `CREATE` revoked, and security-definer procedures.
 - [x] Database boundary triggers preventing privilege escalation on `users` and balance fabrication on `accounts`.
 - [x] Normal balance classification (`DEBIT` vs. `CREDIT`) and trigger-based projection.
 - [x] Operational system cash vault account (`SYS-INR-CASH-VAULT-001`) with strict property validation.
 - [x] Customer account management with unique bounded `VLTR` number generation and server-side owner binding.
-- [x] Simulated double-entry cash deposits and withdrawals.
+- [x] Simulated double-entry cash deposits and withdrawals against operational system cash vault.
 - [x] Atomic customer-to-customer transfers with zero-sum ledger invariants.
 - [x] Concurrency-safe row-locking (`FOR UPDATE`) with deterministic UUID ordering.
-- [x] Deadlock-free bilateral concurrent transfers.
 - [x] Overdraft prevention with post-lock balance validation.
 - [x] Concurrency-safe idempotency via PostgreSQL transaction-scoped advisory locks (`pg_advisory_xact_lock`).
 - [x] Canonical SHA-256 payload fingerprinting (scale-2 normalization without rounding).
-- [x] Cross-account idempotency serialization for the same user.
 - [x] Viewer-aware response privacy masking (system vault hidden, counterpart accounts masked).
-- [x] Optimized transaction history query eliminating N+1 entries pattern.
 - [x] Sliding-window login rate limiting with access-ordered LRU eviction and security audit logging.
-- [x] Safe global exception handling suppressing internal database stack traces to clients.
-- [x] Audit logging for account creation, deposits, withdrawals, transfers, and rate limit exhaustion.
-- [x] Fine-grained RBAC: `AUDITOR` strictly blocked from money movement and account creation.
-- [x] Isolated PostgreSQL test database (`ledgerline_test_db`) and runtime safety guard (`TestDatabaseGuard`).
-- [x] Automated PostgreSQL catalog assertions detecting privilege regressions in integration tests.
-- [x] Formal engineering threat model ([THREATS.md](THREATS.md)).
-- [x] Responsive React 19 + Vite 8 frontend client application implementing the 5 core banking views based on PDF design specification.
-- [x] Robust frontend transaction idempotency lifecycle with uncertain state recovery and `sessionStorage` persistence.
-- [x] Honest banking domain presentation (masked account numbers, trigger-projected balances, no fabricated products or full names).
-- [x] Customer-centric transaction history formatting correctly distinguishing sender and receiver legs for own-account transfers.
 - [x] Three-role application architecture with role-aware routing, dedicated Auditor Portal (`/auditor`), Admin Console (`/admin`), and Access Denied handling (`/access-denied`).
-- [x] Cloud deployment configuration for Vercel (frontend), Render (Spring Boot Docker backend), and Managed PostgreSQL (`render.yaml`, `Dockerfile`, `vercel.json`, `scripts/provision-demo-users.sql`).
-- [x] Standalone idempotent demo provisioning tool (`DemoProvisioningTool.java`) managing 16 identities, 19 accounts, and Git-ignored `private/demo-credentials.local.md`.
-- [x] Refined failed-attempt rate limiting policy (5 email / 30 IP / 60s cooldown) with exact `Retry-After` reporting and zero consumption on valid logins.
-- [x] 100% test pass rate across 139 automated tests (108 backend integration/unit tests + 31 frontend tests).
+- [x] Customer account-opening requests (`POST /api/v1/account-requests`) with administrative approval queue, status badges, and real-time polling synchronization.
+- [x] Universal self-service password update (`POST /api/v1/auth/password`) across Customer, Auditor, and Admin roles with UTF-8 byte boundary checks and procedure-level DB security.
+- [x] Customer email verification (`POST /api/v1/auth/verify-email`, `POST /api/v1/auth/resend-verification`) with dedicated `/verify-email` frontend route.
+- [x] Self-service password recovery (`POST /api/v1/auth/forgot-password`, `POST /api/v1/auth/reset-password`) with `/forgot-password` and `/reset-password` frontend routes.
+- [x] Compensating transaction reversals linking original transactions via `related_transaction_id` and setting status to `REVERSED`.
+- [x] Configurable per-transaction and rolling 24-hour daily transaction limits (`GET/PUT /api/v1/admin/settings/limits`).
+- [x] Maker-checker dual-authorization workflows (`/api/v1/admin/maker-checker/**`) enforcing the four-eyes principle (initiators cannot self-approve).
+- [x] Official account statement downloads in PDF (`%PDF-1.4`) and CSV formats with date range filtering and spreadsheet formula injection sanitization.
+- [x] Auditor transaction inspection with multi-criteria filtering, pagination, and formula-sanitized CSV export.
+- [x] Auditor Ledger Integrity verification (`/api/v1/audit/ledger-integrity`) asserting global debit=credit equality, zero unbalanced transactions, and zero account balance discrepancies.
+- [x] OpenAPI 3.0 / Swagger documentation endpoints (`/swagger-ui.html`, `/v3/api-docs`).
+- [x] 100% automated test pass rate across unit, integration, and frontend suites.
 
-### Planned Beyond Phase 3 (Deferred)
-- [ ] Compensating transaction reversal endpoint (`POST /api/v1/transactions/{id}/reverse`).
-- [ ] Multi-currency foreign exchange (FX) settlement accounts.
-- [ ] Distributed Redis session clustering and multi-node rate limiting.
-- [ ] External banking rail / payment gateway integration.
+### Explicitly Excluded & Deferred Scope
+- [ ] Multi-currency foreign exchange (FX) settlement accounts (currently single-currency `INR`).
+- [ ] Distributed Redis session clustering and multi-node rate limiting (currently in-memory with session cookies).
+- [ ] External banking rail / payment gateway integration (ACH, SEPA, UPI).
+- [ ] **Excluded from Current Scope**: KYC (Know Your Customer) identity verification and automated suspicious transaction detection heuristics are outside the simulation scope. Customer email address ownership verification is identity-hygiene only and is not KYC. Token-based stateless authentication (JWT) is explicitly excluded in favor of Spring Security server-managed session cookies.

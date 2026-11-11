@@ -104,7 +104,7 @@ public class AccountRequestService {
 
     @Transactional
     public AccountRequestResponse reviewRequest(UUID requestId, boolean approve, String adminNotes, UserEntity admin) {
-        AccountRequestEntity request = accountRequestRepository.findByIdForUpdate(requestId)
+        AccountRequestEntity request = accountRequestRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Account request not found: " + requestId));
 
         if (request.getStatus() != AccountRequestStatus.PENDING) {
