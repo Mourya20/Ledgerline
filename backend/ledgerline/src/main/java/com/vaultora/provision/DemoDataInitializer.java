@@ -72,7 +72,7 @@ public class DemoDataInitializer implements ApplicationRunner {
                     try (PreparedStatement insertPs = conn.prepareStatement(
                             "INSERT INTO users (id, email, password_hash, role, status, email_verified, created_at, updated_at) " +
                             "VALUES (?, ?, ?, ?, 'ACTIVE', true, NOW(), NOW()) " +
-                            "ON CONFLICT (email) DO NOTHING")) {
+                            "ON CONFLICT (id) DO NOTHING")) {
                         insertPs.setObject(1, userId);
                         insertPs.setString(2, spec.email());
                         insertPs.setString(3, passwordHash);
