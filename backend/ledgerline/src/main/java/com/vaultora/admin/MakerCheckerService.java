@@ -23,7 +23,6 @@ import com.vaultora.domain.LedgerTransactionEntity;
 import com.vaultora.domain.MakerCheckerRequestEntity;
 import com.vaultora.domain.MakerCheckerStatus;
 import com.vaultora.domain.MakerCheckerType;
-import com.vaultora.domain.NormalBalance;
 import com.vaultora.domain.TransactionStatus;
 import com.vaultora.domain.UserEntity;
 import com.vaultora.exception.AccountInactiveException;

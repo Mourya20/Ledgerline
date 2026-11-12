@@ -49,9 +49,13 @@ public class LoginRateLimiter {
         this.attempts = new LinkedHashMap<>(16, 0.75f, true) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<String, Deque<Instant>> eldest) {
-                return size() > maxTrackedKeys;
+                return size() > LoginRateLimiter.this.maxTrackedKeys;
             }
         };
+    }
+
+    public int getMaxTrackedKeys() {
+        return maxTrackedKeys;
     }
 
     /**

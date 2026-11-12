@@ -35,10 +35,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
+    let ignore = false;
     // Initial session verification & CSRF token warming
     authApi.getCsrf().catch(() => {});
-    refreshUser();
-  }, [refreshUser]);
+    async function checkAuth() {
+      try {
+        const me = await authApi.getMe();
+        if (!ignore) {
+          setUser(me);
+        }
+      } catch {
+        if (!ignore) {
+          setUser(null);
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+    checkAuth();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const login = async (credentials: LoginRequest): Promise<UserResponse> => {
     const loggedInUser = await authApi.login(credentials);
@@ -77,6 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// oxlint-disable-next-line react/only-export-components
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) {

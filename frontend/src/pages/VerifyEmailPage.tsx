@@ -17,13 +17,7 @@ export const VerifyEmailPage: React.FC = () => {
   const [isResending, setIsResending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (tokenParam) {
-      handleVerify(tokenParam);
-    }
-  }, [tokenParam]);
-
-  const handleVerify = async (verificationToken: string) => {
+  const handleVerify = React.useCallback(async (verificationToken: string) => {
     try {
       setIsVerifying(true);
       setError(null);
@@ -35,7 +29,35 @@ export const VerifyEmailPage: React.FC = () => {
     } finally {
       setIsVerifying(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!tokenParam) return;
+    let ignore = false;
+    async function verifyParam() {
+      try {
+        setIsVerifying(true);
+        setError(null);
+        await authApi.verifyEmail({ token: tokenParam.trim() });
+        if (!ignore) {
+          setVerified(true);
+        }
+      } catch (err: unknown) {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : 'Invalid or expired verification token.';
+          setError(msg);
+        }
+      } finally {
+        if (!ignore) {
+          setIsVerifying(false);
+        }
+      }
+    }
+    verifyParam();
+    return () => {
+      ignore = true;
+    };
+  }, [tokenParam]);
 
   const handleResend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +73,7 @@ export const VerifyEmailPage: React.FC = () => {
       } else {
         setResendMessage(res.message || 'If an unverified account exists with that email, a verification link has been sent.');
       }
-    } catch (err: unknown) {
+    } catch {
       setResendMessage('If an unverified account exists with that email, a verification link has been sent.');
     } finally {
       setIsResending(false);

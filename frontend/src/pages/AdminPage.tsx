@@ -195,8 +195,8 @@ export const AdminPage: React.FC = () => {
       setAccountsError(null);
       const res = await accountsApi.getAccounts();
       setAccounts(res);
-      if (res.length > 0 && !depositAccountId) {
-        setDepositAccountId(res[0].id);
+      if (res.length > 0) {
+        setDepositAccountId((prev) => prev || res[0].id);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to retrieve accounts.';
@@ -204,7 +204,7 @@ export const AdminPage: React.FC = () => {
     } finally {
       setAccountsLoading(false);
     }
-  }, [depositAccountId]);
+  }, [setDepositAccountId]);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -342,22 +342,40 @@ export const AdminPage: React.FC = () => {
 
   // Initial load
   useEffect(() => {
-    fetchHealth();
-    fetchStats();
-    fetchAccounts();
-    fetchUsers();
-    fetchTransactions();
-    fetchAccountRequests();
-    fetchMakerChecker();
-    fetchLimits();
+    let ignore = false;
+    const run = async () => {
+      await Promise.resolve();
+      if (ignore) return;
+      fetchHealth();
+      fetchStats();
+      fetchAccounts();
+      fetchUsers();
+      fetchTransactions();
+      fetchAccountRequests();
+      fetchMakerChecker();
+      fetchLimits();
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
   }, [fetchHealth, fetchStats, fetchAccounts, fetchUsers, fetchTransactions, fetchAccountRequests, fetchMakerChecker, fetchLimits]);
 
 
   // Automatically refresh requests when switching to requests tab
   useEffect(() => {
-    if (activeTab === 'requests') {
-      fetchAccountRequests();
-    }
+    let ignore = false;
+    const run = async () => {
+      await Promise.resolve();
+      if (ignore) return;
+      if (activeTab === 'requests') {
+        fetchAccountRequests();
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
   }, [activeTab, fetchAccountRequests]);
 
   // Periodic polling for incoming account requests and maker-checker

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { accountsApi } from '../api/accounts';
 import { transactionsApi } from '../api/transactions';
@@ -31,30 +31,38 @@ export const HistoryPage: React.FC = () => {
     loadAccounts();
   }, []);
 
-  const loadTransactions = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const res = await transactionsApi.getTransactions({
-        accountId: selectedAccountId || undefined,
-        page: currentPage,
-        size: pageSize,
-        sort: 'createdAt,desc',
-      });
-
-      setPageData(res);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load transaction history';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedAccountId, currentPage]);
-
   useEffect(() => {
-    loadTransactions();
-  }, [loadTransactions]);
+    let ignore = false;
+    async function fetchTransactions() {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await transactionsApi.getTransactions({
+          accountId: selectedAccountId || undefined,
+          page: currentPage,
+          size: pageSize,
+          sort: 'createdAt,desc',
+        });
+        if (!ignore) {
+          setPageData(res);
+        }
+      } catch (err: unknown) {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : 'Failed to load transaction history';
+          setError(msg);
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchTransactions();
+    return () => {
+      ignore = true;
+    };
+  }, [selectedAccountId, currentPage]);
 
   const handleAccountFilterChange = (accId: string) => {
     setSelectedAccountId(accId);

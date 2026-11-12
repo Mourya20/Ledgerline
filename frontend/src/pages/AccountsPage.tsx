@@ -45,7 +45,6 @@ export const AccountsPage: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
       setError(null);
       const [accountsData, requestsData] = await Promise.all([
         accountsApi.getAccounts(),
@@ -62,9 +61,34 @@ export const AccountsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 8000);
-    return () => clearInterval(interval);
+    let ignore = false;
+    async function load() {
+      try {
+        const [accountsData, requestsData] = await Promise.all([
+          accountsApi.getAccounts(),
+          accountRequestsApi.getRequests(),
+        ]);
+        if (!ignore) {
+          setAccounts(accountsData);
+          setAccountRequests(requestsData);
+        }
+      } catch (err: unknown) {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : 'Failed to load accounts';
+          setError(msg);
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+    load();
+    const interval = setInterval(load, 8000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const pendingRequests = accountRequests.filter((r) => r.status === 'PENDING');

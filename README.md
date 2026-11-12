@@ -780,7 +780,9 @@ cd backend\ledgerline
 - [x] Auditor transaction inspection with multi-criteria filtering, pagination, and formula-sanitized CSV export.
 - [x] Auditor Ledger Integrity verification (`/api/v1/audit/ledger-integrity`) asserting global debit=credit equality, zero unbalanced transactions, and zero account balance discrepancies.
 - [x] OpenAPI 3.0 / Swagger documentation endpoints (`/swagger-ui.html`, `/v3/api-docs`).
-- [x] 100% automated test pass rate across unit, integration, and frontend suites.
+- [x] 100% automated test pass rate across unit, integration, and frontend suites (151 backend integration tests and 37 frontend vitest tests).
+- [x] Zero-warning, zero-error workspace code hygiene: complete resolution of 26 mapped workspace diagnostics across React Compiler / Oxlint rules and Java Red Hat JDT compiler warnings.
+- [x] Hibernate `@DynamicUpdate` entity alignment ensuring SQL `UPDATE` statements emit only mutated columns, preserving PostgreSQL runtime least-privilege column grants (`role_column_grants`).
 
 ### Explicitly Excluded & Deferred Scope
 - [ ] Multi-currency foreign exchange (FX) settlement accounts (currently single-currency `INR`).

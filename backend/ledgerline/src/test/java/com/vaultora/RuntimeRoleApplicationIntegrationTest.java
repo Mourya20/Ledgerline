@@ -1,14 +1,12 @@
 package com.vaultora;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
@@ -29,7 +27,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.web.servlet.MockMvc;
 
 import com.vaultora.account.AccountService;
 import com.vaultora.account.dto.AccountBalanceResponse;
@@ -37,12 +34,10 @@ import com.vaultora.account.dto.AccountResponse;
 import com.vaultora.account.dto.CreateAccountRequest;
 import com.vaultora.auth.AuthService;
 import com.vaultora.auth.RegisterRequest;
-import com.vaultora.domain.AccountEntity;
 import com.vaultora.domain.TransactionStatus;
 import com.vaultora.domain.UserEntity;
 import com.vaultora.domain.UserRole;
 import com.vaultora.domain.UserStatus;
-import com.vaultora.repository.AccountRepository;
 import com.vaultora.repository.UserRepository;
 import com.vaultora.transaction.TransactionService;
 import com.vaultora.transaction.dto.DepositRequest;
@@ -73,9 +68,6 @@ public class RuntimeRoleApplicationIntegrationTest {
     public static final String SYSTEM_CASH_VAULT_NUMBER = "SYS-INR-CASH-VAULT-001";
 
     @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
     private AuthService authService;
 
     @Autowired
@@ -86,9 +78,6 @@ public class RuntimeRoleApplicationIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
-
-    @Autowired
-    private AccountRepository accountRepository;
 
     @Autowired
     private JdbcTemplate applicationJdbcTemplate;

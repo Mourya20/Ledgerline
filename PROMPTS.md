@@ -989,3 +989,54 @@ Complete the implementation of Extended Banking Controls, correct database migra
 - **Frontend Test Suite**:
   - 37 tests passed across 8 test suites (`vitest run`).
   - Production build: `tsc -b && vite build` built cleanly with zero errors.
+
+---
+
+## 22. 2026-11-12 - Workspace Diagnostics Audit, Hibernate DynamicUpdate Resolution, & End-to-End Application Launch
+
+### Prompt & Context
+Audit and resolve all ~25 reported workspace problems across frontend and backend without altering core functionality or workflow, synchronize documentation markdown files (`README.md`, `PROMPTS.md`, `THREATS.md`), commit all fixes to branch `main`, and run the complete application (backend on port 8080, frontend on port 5173, and PostgreSQL on port 5432).
+
+### Architectural Diagnosis & Problem Resolution (26 Mapped Issues Resolved)
+1. **Frontend React 19 & Oxlint Linter Diagnostics (12 Issues Resolved)**:
+   - **`VerifyEmailPage.tsx`**: Resolved `no-unused-vars` in catch block (`catch {`), resolved `react(immutability)` early reference to `handleVerify`, and resolved `react(set-state-in-effect)` by isolating query token execution.
+   - **`AuthContext.tsx`**: Resolved `react(only-export-components)` fast-refresh warning and resolved `react(set-state-in-effect)` by internalizing async auth validation.
+   - **`HistoryPage.tsx`**: Resolved `react(set-state-in-effect)` cascading renders by inlining transaction fetch logic inside `useEffect` with cleanup cancellation flag `ignore`.
+   - **`AccountsPage.tsx`**: Decoupled mounting data fetch from synchronous `setLoading(true)` spinner update, eliminating cascading re-render loops.
+   - **`MoveMoneyPage.tsx`**: Converted stored intent state initialization into lazy `useState` initializers and eliminated missing `fetchAccounts` exhaustive-deps warning.
+   - **`AuditorPage.tsx`**: Resolved `react(set-state-in-effect)` by scheduling asynchronous fetch routines inside `useEffect` with promise microtask decoupling and unmount protection.
+   - **`AdminPage.tsx`**:
+     - Fixed `react(preserve-manual-memoization)` on `fetchAccounts` by using functional state updater `setDepositAccountId((prev) => prev || res[0].id)` and declaring `[setDepositAccountId]`.
+     - Resolved `react(set-state-in-effect)` on initial load and requests tab change through microtask-decoupled effect routines.
+   - **Frontend Result**: `npx oxlint` reports **0 warnings, 0 errors** across 43 files.
+2. **Backend Java Compiler & Red Hat JDT Diagnostics (14 Issues Resolved)**:
+   - **Unused Imports Cleaned**:
+     - `MakerCheckerService.java`: `com.vaultora.domain.NormalBalance`
+     - `AuditorInspectionService.java`: `jakarta.persistence.criteria.Join`
+     - `OpenApiController.java`: `java.util.Map`
+     - `ExtendedBankingControlsIntegrationTests.java`: `MakerCheckerRequestEntity`, `MakerCheckerStatus`, `UserStatus`, `WithdrawRequest`
+     - `RuntimeRoleApplicationIntegrationTest.java`: `assertFalse`, `java.util.Map`, `AccountEntity`
+     - `AccountManagementIntegrationTests.java`: `assertNotNull`
+   - **Unused Test Fields Cleaned**:
+     - `ExtendedBankingControlsIntegrationTests.java`: `makerCheckerRequestRepository`
+     - `RuntimeRoleApplicationIntegrationTest.java`: `mockMvc`, `accountRepository`
+   - **`LoginRateLimiter.java`**: Addressed `maxTrackedKeys` unused field warning by referencing `LoginRateLimiter.this.maxTrackedKeys` in anonymous LRU eviction predicate and adding getter `getMaxTrackedKeys()`.
+   - **Hibernate `@DynamicUpdate` on `LedgerTransactionEntity`**:
+     - When executing transactions under the least-privilege PostgreSQL role (`ledgerline_runtime`), standard Hibernate UPDATE statements emitted all table columns (`completed_at`, `related_transaction_id`, `reversal_reason`, `status`). Because `ledgerline_runtime` is strictly granted column-level `UPDATE (status, completed_at)`, PostgreSQL denied execution.
+     - Added `@DynamicUpdate` to `LedgerTransactionEntity`. Hibernate now emits SQL UPDATE clauses containing only dirty/mutated columns, perfectly aligning with database privilege invariants.
+3. **Database Environment & Runtime Role Alignment**:
+   - Provisioned `.env` configuration mapping Docker container credentials (`DB_PASSWORD` and `APP_DB_PASSWORD`) for both `ledgerline_db` and `ledgerline_test_db`.
+   - Validated that Flyway schema history remains pristine at version 14 with full validation.
+
+### Verification Results
+- **Backend Test Suite**: **151 tests run, 151 passed, 0 failures, 0 errors** (`BUILD SUCCESS`).
+  - `Phase1IntegrationTests`: 31/31 passed.
+  - `Phase2FinancialEngineIntegrationTests`: 56/56 passed (all 22 security catalog assertions verified).
+  - `ExtendedBankingControlsIntegrationTests`: 8/8 passed.
+  - `RuntimeRoleApplicationIntegrationTest`: 8/8 passed under runtime least-privilege identity.
+  - `AccountManagementIntegrationTests`: 32/32 passed.
+  - `LoginRateLimiterTest`: 14/14 passed.
+  - `MaxUtf8BytesValidatorTest`: 1/1 passed.
+  - `VaultoraApplicationTests`: 1/1 passed.
+- **Frontend Test Suite**: **37 tests passed (100%)** across 8 test suites (`vitest run`).
+- **Linter & Compiler Status**: 0 errors, 0 warnings across frontend (`oxlint`) and backend (`javac`).

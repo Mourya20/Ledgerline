@@ -30,23 +30,18 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.vaultora.domain.AccountEntity;
 import com.vaultora.domain.AccountType;
 import com.vaultora.domain.EmailVerificationTokenEntity;
-import com.vaultora.domain.MakerCheckerRequestEntity;
-import com.vaultora.domain.MakerCheckerStatus;
 import com.vaultora.domain.PasswordResetTokenEntity;
 import com.vaultora.domain.TransactionStatus;
 import com.vaultora.domain.UserEntity;
 import com.vaultora.domain.UserRole;
-import com.vaultora.domain.UserStatus;
 import com.vaultora.repository.AccountRepository;
 import com.vaultora.repository.EmailVerificationTokenRepository;
 import com.vaultora.repository.LedgerTransactionRepository;
-import com.vaultora.repository.MakerCheckerRequestRepository;
 import com.vaultora.repository.PasswordResetTokenRepository;
 import com.vaultora.repository.UserRepository;
 import com.vaultora.transaction.TransactionService;
 import com.vaultora.transaction.dto.DepositRequest;
 import com.vaultora.transaction.dto.TransferRequest;
-import com.vaultora.transaction.dto.WithdrawRequest;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -65,9 +60,6 @@ public class ExtendedBankingControlsIntegrationTests {
 
     @Autowired
     private LedgerTransactionRepository ledgerTransactionRepository;
-
-    @Autowired
-    private MakerCheckerRequestRepository makerCheckerRequestRepository;
 
     @Autowired
     private EmailVerificationTokenRepository emailVerificationTokenRepository;

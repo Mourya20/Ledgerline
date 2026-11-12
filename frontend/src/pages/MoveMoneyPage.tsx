@@ -35,19 +35,40 @@ export const MoveMoneyPage: React.FC = () => {
   );
 
   // Deposit Form State
-  const [depositAccountId, setDepositAccountId] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
+  const [depositAccountId, setDepositAccountId] = useState(() => {
+    const dep = getStoredIntent<DepositPayload>('deposit');
+    return dep?.status === 'UNCERTAIN' ? dep.payload.accountId : '';
+  });
+  const [depositAmount, setDepositAmount] = useState(() => {
+    const dep = getStoredIntent<DepositPayload>('deposit');
+    return dep?.status === 'UNCERTAIN' ? dep.payload.amount.toString() : '';
+  });
   const [depositLoading, setDepositLoading] = useState(false);
 
   // Withdraw Form State
-  const [withdrawAccountId, setWithdrawAccountId] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawAccountId, setWithdrawAccountId] = useState(() => {
+    const w = getStoredIntent<WithdrawPayload>('withdraw');
+    return w?.status === 'UNCERTAIN' ? w.payload.accountId : '';
+  });
+  const [withdrawAmount, setWithdrawAmount] = useState(() => {
+    const w = getStoredIntent<WithdrawPayload>('withdraw');
+    return w?.status === 'UNCERTAIN' ? w.payload.amount.toString() : '';
+  });
   const [withdrawLoading, setWithdrawLoading] = useState(false);
 
   // Transfer Form State
-  const [transferSourceId, setTransferSourceId] = useState('');
-  const [transferDestNumber, setTransferDestNumber] = useState('');
-  const [transferAmount, setTransferAmount] = useState('');
+  const [transferSourceId, setTransferSourceId] = useState(() => {
+    const t = getStoredIntent<TransferPayload>('transfer');
+    return t?.status === 'UNCERTAIN' ? t.payload.sourceAccountId : (initialSourceId || '');
+  });
+  const [transferDestNumber, setTransferDestNumber] = useState(() => {
+    const t = getStoredIntent<TransferPayload>('transfer');
+    return t?.status === 'UNCERTAIN' ? t.payload.destinationAccountNumber : '';
+  });
+  const [transferAmount, setTransferAmount] = useState(() => {
+    const t = getStoredIntent<TransferPayload>('transfer');
+    return t?.status === 'UNCERTAIN' ? t.payload.amount.toString() : '';
+  });
   const [transferLoading, setTransferLoading] = useState(false);
   const [showTransferReview, setShowTransferReview] = useState(false);
   const [isTransferRetry, setIsTransferRetry] = useState(false);
@@ -57,16 +78,16 @@ export const MoveMoneyPage: React.FC = () => {
 
   const fetchAccounts = async () => {
     try {
-      setLoading(true);
       const data = await accountsApi.getAccounts();
       setAccounts(data);
       if (data.length > 0) {
-        if (!depositAccountId) setDepositAccountId(data[0].id);
-        if (!withdrawAccountId) setWithdrawAccountId(data[0].id);
-        if (!transferSourceId) {
+        setDepositAccountId((prev) => prev || data[0].id);
+        setWithdrawAccountId((prev) => prev || data[0].id);
+        setTransferSourceId((prev) => {
+          if (prev) return prev;
           const match = initialSourceId ? data.find((a) => a.id === initialSourceId) : null;
-          setTransferSourceId(match ? match.id : data[0].id);
-        }
+          return match ? match.id : data[0].id;
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load accounts';
@@ -77,31 +98,38 @@ export const MoveMoneyPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchAccounts();
-
-    // If an uncertain intent exists, populate form with its preserved payload
-    const storedDep = getStoredIntent<DepositPayload>('deposit');
-    if (storedDep?.status === 'UNCERTAIN') {
-      setDepositAccountId(storedDep.payload.accountId);
-      setDepositAmount(storedDep.payload.amount.toString());
-      setDepositIntent(storedDep);
+    let ignore = false;
+    async function init() {
+      try {
+        const data = await accountsApi.getAccounts();
+        if (!ignore) {
+          setAccounts(data);
+          if (data.length > 0) {
+            setDepositAccountId((prev) => prev || data[0].id);
+            setWithdrawAccountId((prev) => prev || data[0].id);
+            setTransferSourceId((prev) => {
+              if (prev) return prev;
+              const match = initialSourceId ? data.find((a) => a.id === initialSourceId) : null;
+              return match ? match.id : data[0].id;
+            });
+          }
+        }
+      } catch (err: unknown) {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : 'Failed to load accounts';
+          setNotification({ type: 'error', message: msg });
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
     }
-
-    const storedWith = getStoredIntent<WithdrawPayload>('withdraw');
-    if (storedWith?.status === 'UNCERTAIN') {
-      setWithdrawAccountId(storedWith.payload.accountId);
-      setWithdrawAmount(storedWith.payload.amount.toString());
-      setWithdrawIntent(storedWith);
-    }
-
-    const storedTrans = getStoredIntent<TransferPayload>('transfer');
-    if (storedTrans?.status === 'UNCERTAIN') {
-      setTransferSourceId(storedTrans.payload.sourceAccountId);
-      setTransferDestNumber(storedTrans.payload.destinationAccountNumber);
-      setTransferAmount(storedTrans.payload.amount.toString());
-      setTransferIntent(storedTrans);
-    }
-  }, []);
+    init();
+    return () => {
+      ignore = true;
+    };
+  }, [initialSourceId]);
 
   const selectedWithdrawAccount = accounts.find((a) => a.id === withdrawAccountId);
   const selectedTransferSourceAccount = accounts.find((a) => a.id === transferSourceId);

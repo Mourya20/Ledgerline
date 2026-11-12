@@ -28,7 +28,6 @@ import com.vaultora.repository.AccountRepository;
 import com.vaultora.repository.LedgerEntryRepository;
 import com.vaultora.repository.LedgerTransactionRepository;
 
-import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 

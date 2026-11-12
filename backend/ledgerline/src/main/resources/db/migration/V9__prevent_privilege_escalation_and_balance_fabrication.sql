@@ -2,7 +2,6 @@
 -- Enforces database-level boundaries on INSERT operations for runtime identity (ledgerline_runtime).
 
 -- 1. Enforce NOINHERIT on runtime role
-ALTER ROLE ledgerline_runtime NOINHERIT;
 
 -- 2. Revoke CREATE on schema public from PUBLIC
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

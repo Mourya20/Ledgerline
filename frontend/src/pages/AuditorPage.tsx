@@ -119,13 +119,22 @@ export const AuditorPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'logs') {
-      fetchLogs();
-    } else if (activeTab === 'transactions') {
-      fetchTransactions();
-    } else if (activeTab === 'integrity') {
-      fetchIntegrity();
-    }
+    let ignore = false;
+    const run = async () => {
+      await Promise.resolve();
+      if (ignore) return;
+      if (activeTab === 'logs') {
+        fetchLogs();
+      } else if (activeTab === 'transactions') {
+        fetchTransactions();
+      } else if (activeTab === 'integrity') {
+        fetchIntegrity();
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
   }, [activeTab, fetchLogs, fetchTransactions, fetchIntegrity]);
 
   const handleExportCsv = async () => {

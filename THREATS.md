@@ -676,6 +676,7 @@ Vaultora operates under a strict **defense-in-depth model**: the application lay
 - **Implementation Evidence**:
   - `backend/ledgerline/src/main/resources/db/migration/V8__harden_runtime_database_privileges.sql`
   - `backend/ledgerline/src/main/resources/db/migration/V9__prevent_privilege_escalation_and_balance_fabrication.sql`
+  - `backend/ledgerline/src/main/java/com/vaultora/domain/LedgerTransactionEntity.java` (`@DynamicUpdate` ensures SQL updates emit only modified columns matching granted column privileges)
   - `backend/ledgerline/src/main/resources/application.properties`
   - `backend/ledgerline/src/test/resources/application-test.properties`
 - **Verification**: `Phase2FinancialEngineIntegrationTests.runtimeRoleCatalogAttributesAssertLeastPrivilege()`, `runtimeRoleTableGrantsAreStrictlyLimitedToSelectAndInsert()`, `runtimeRoleColumnGrantsLimitUpdateStrictly()`, `schemaPublicHasNoCreatePrivilegeForRuntimeOrPublic()`

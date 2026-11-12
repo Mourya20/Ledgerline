@@ -13,9 +13,11 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
 @Table(name = "ledger_transactions")
+@DynamicUpdate
 public class LedgerTransactionEntity {
 
     @Id
