@@ -40,6 +40,12 @@ public class SecurityConfig {
     private final UserRepository userRepository;
     private final AuditService auditService;
 
+    @org.springframework.beans.factory.annotation.Value("${server.servlet.session.cookie.secure:false}")
+    private boolean cookieSecure;
+
+    @org.springframework.beans.factory.annotation.Value("${server.servlet.session.cookie.same-site:lax}")
+    private String cookieSameSite;
+
     public SecurityConfig(SessionUserValidationFilter sessionUserValidationFilter,
             UserRepository userRepository,
             AuditService auditService) {
@@ -82,6 +88,14 @@ public class SecurityConfig {
             AuthenticationProvider authenticationProvider, CorsConfigurationSource corsConfigurationSource,
             AccessDeniedHandler accessDeniedHandler) throws Exception {
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        csrfTokens.setCookieCustomizer(cookie -> {
+            if (cookieSecure) {
+                cookie.secure(true);
+            }
+            if (cookieSameSite != null && !cookieSameSite.isBlank()) {
+                cookie.sameSite(cookieSameSite);
+            }
+        });
         CsrfTokenRequestAttributeHandler csrfRequestHandler = new CsrfTokenRequestAttributeHandler();
         csrfRequestHandler.setCsrfRequestAttributeName(null);
 
