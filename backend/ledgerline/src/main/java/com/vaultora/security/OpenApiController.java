@@ -13,7 +13,7 @@ public class OpenApiController {
         return ResponseEntity.ok(buildOpenApiJson());
     }
 
-    @GetMapping(value = {"/swagger-ui.html", "/api/v1/docs"}, produces = MediaType.TEXT_HTML_VALUE)
+    @GetMapping(value = {"/", "/swagger-ui.html", "/api/v1/docs"}, produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> getSwaggerUi() {
         String html = """
                 <!DOCTYPE html>
@@ -66,6 +66,14 @@ public class OpenApiController {
             "description": "Production-grade core banking engine with double-entry ledger, maker-checker authorization, transaction limits, auditor dashboard, and customer account statements."
           },
           "servers": [
+            {
+              "url": "/",
+              "description": "Current Server (Auto-detect)"
+            },
+            {
+              "url": "https://vaultora-banking.onrender.com",
+              "description": "Render Production Server"
+            },
             {
               "url": "http://localhost:8080",
               "description": "Local Development Server"
