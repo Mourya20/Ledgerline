@@ -123,10 +123,9 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/api/v1/docs",
-                                "/actuator/health",
-                                "/actuator/health/**")
+                                "/api/v1/docs")
                         .permitAll()
+                        .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/audit/**").hasAnyRole("ADMIN", "AUDITOR")
                         .requestMatchers("/api/v1/audit/**").hasRole("ADMIN")
