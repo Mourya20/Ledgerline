@@ -137,7 +137,7 @@ export const SignInPage: React.FC = () => {
             letterSpacing: '0.02em'
           }}>
             <span>🛡️</span>
-            <span>CORE BANKING & DOUBLE-ENTRY LEDGER</span>
+            <span>Secure Banking & Transaction Platform</span>
           </div>
 
           <h2 style={{
@@ -223,21 +223,6 @@ export const SignInPage: React.FC = () => {
                 <div style={{ fontSize: '13px', color: '#64748B' }}>Real-time immutable audit trail with formula-safe CSV and PDF statement exports.</div>
               </div>
             </div>
-          </div>
-
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '12px',
-            color: '#059669',
-            backgroundColor: '#F0FDF4',
-            border: '1px solid #BBF7D0',
-            padding: '6px 12px',
-            borderRadius: '6px'
-          }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }} />
-            <span style={{ fontWeight: 600 }}>System Live</span> &bull; 100% Invariant Compliant &bull; Vercel + Render + Supabase
           </div>
         </div>
 
