@@ -8,13 +8,15 @@ export const VerifyEmailPage: React.FC = () => {
   const tokenParam = searchParams.get('token') || '';
   const navigate = useNavigate();
 
+  const emailParam = searchParams.get('email') || '';
+
   const [token, setToken] = useState(tokenParam);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Resend state
-  const [resendEmail, setResendEmail] = useState('');
+  const [resendEmail, setResendEmail] = useState(emailParam);
   const [isResending, setIsResending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
 
@@ -63,6 +65,7 @@ export const VerifyEmailPage: React.FC = () => {
   const handleResend = async (e: React.FormEvent) => {
     e.preventDefault();
     setResendMessage(null);
+    setError(null);
     if (!resendEmail.trim()) return;
 
     try {
@@ -70,7 +73,8 @@ export const VerifyEmailPage: React.FC = () => {
       const res = (await authApi.resendVerification({ email: resendEmail.trim() })) as { message?: string; token?: string; link?: string };
       if (res.token) {
         setToken(res.token);
-        setResendMessage(`Verification token received: ${res.token}. It has been filled into the input above.`);
+        // Automatically verify token immediately for seamless one-click activation!
+        await handleVerify(res.token);
       } else {
         setResendMessage(res.message || 'If an unverified account exists with that email, a verification link has been sent.');
       }
@@ -125,7 +129,7 @@ export const VerifyEmailPage: React.FC = () => {
             <button
               type="button"
               className="btn-primary"
-              style={{ width: '100%', padding: '11px', backgroundColor: '#0D6E64' }}
+              style={{ width: '100%', padding: '11px' }}
               onClick={() => navigate('/login')}
             >
               Continue to Sign in
@@ -133,9 +137,24 @@ export const VerifyEmailPage: React.FC = () => {
           </div>
         ) : (
           <div>
-            <p style={{ fontSize: '14px', color: '#4B5563', marginBottom: '20px' }}>
-              Confirm your email address to activate your customer banking account.
-            </p>
+            {/* Sandbox Simulation Notice Banner */}
+            <div style={{
+              backgroundColor: 'var(--primary-teal-light)',
+              border: '1px solid var(--primary-teal-border)',
+              borderRadius: '8px',
+              padding: '12px 14px',
+              marginBottom: '20px',
+              fontSize: '13px',
+              lineHeight: 1.5,
+              color: 'var(--text-main)'
+            }}>
+              <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', color: 'var(--primary-teal)' }}>
+                <span>💡</span> Simulated Email Verification
+              </div>
+              <div style={{ color: 'var(--text-muted)' }}>
+                In this demonstration environment, live outbound SMTP delivery is simulated. Click <strong>&quot;Instant Account Activation&quot;</strong> below to verify your email and activate your account immediately.
+              </div>
+            </div>
 
             {error && (
               <div className="alert alert-danger" style={{ marginBottom: '16px', padding: '10px 14px', fontSize: '13px' }}>
@@ -143,70 +162,76 @@ export const VerifyEmailPage: React.FC = () => {
               </div>
             )}
 
+            {/* Instant One-Click Verification Form */}
+            <form onSubmit={handleResend} style={{ marginBottom: '24px' }}>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label" htmlFor="resend-email" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  Registered Customer Email
+                </label>
+                <input
+                  id="resend-email"
+                  type="email"
+                  className="form-input"
+                  placeholder="Enter your customer email"
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  disabled={isResending || isVerifying}
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn-primary"
+                style={{ width: '100%', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                disabled={isResending || isVerifying}
+              >
+                <span>⚡</span>
+                <span>{isResending || isVerifying ? 'Activating account...' : 'Instant Account Activation'}</span>
+              </button>
+            </form>
+
+            {resendMessage && (
+              <div className="alert alert-success" style={{ marginBottom: '16px', padding: '10px 14px', fontSize: '13px' }}>
+                {resendMessage}
+              </div>
+            )}
+
             {!tokenParam ? (
-              <form onSubmit={(e) => { e.preventDefault(); handleVerify(token); }} style={{ marginBottom: '28px' }}>
-                <div className="form-group" style={{ marginBottom: '16px' }}>
-                  <label className="form-label" htmlFor="manual-token">
-                    Verification Token
-                  </label>
-                  <input
-                    id="manual-token"
-                    type="text"
-                    className="form-input"
-                    placeholder="Enter token from email"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
+              <details style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                <summary style={{ fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+                  Manual verification token entry (optional)
+                </summary>
+                <form onSubmit={(e) => { e.preventDefault(); handleVerify(token); }} style={{ marginTop: '14px' }}>
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label className="form-label" htmlFor="manual-token">
+                      Verification Token
+                    </label>
+                    <input
+                      id="manual-token"
+                      type="text"
+                      className="form-input"
+                      placeholder="Enter verification token"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      disabled={isVerifying}
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="btn btn-secondary"
+                    style={{ width: '100%', padding: '8px', fontSize: '13px' }}
                     disabled={isVerifying}
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  style={{ width: '100%', padding: '10px', backgroundColor: '#0D6E64' }}
-                  disabled={isVerifying}
-                >
-                  {isVerifying ? 'Verifying...' : 'Verify Token'}
-                </button>
-              </form>
+                  >
+                    {isVerifying ? 'Verifying...' : 'Verify Token'}
+                  </button>
+                </form>
+              </details>
             ) : isVerifying ? (
-              <div style={{ textAlign: 'center', padding: '24px', color: '#6B7280' }}>
+              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                 Verifying your email token...
               </div>
             ) : null}
-
-            {/* Resend Verification Section */}
-            <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '20px', marginTop: '20px' }}>
-              <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#374151', margin: '0 0 8px 0' }}>
-                Need a new verification link?
-              </h2>
-              {resendMessage && (
-                <div className="alert alert-success" style={{ marginBottom: '12px', padding: '10px 14px', fontSize: '13px' }}>
-                  {resendMessage}
-                </div>
-              )}
-              <form onSubmit={handleResend}>
-                <div className="form-group" style={{ marginBottom: '12px' }}>
-                  <input
-                    type="email"
-                    className="form-input"
-                    placeholder="Enter your customer email"
-                    value={resendEmail}
-                    onChange={(e) => setResendEmail(e.target.value)}
-                    disabled={isResending}
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="btn btn-secondary"
-                  style={{ width: '100%', padding: '8px', fontSize: '13px' }}
-                  disabled={isResending}
-                >
-                  {isResending ? 'Sending...' : 'Resend Verification Email'}
-                </button>
-              </form>
-            </div>
 
             <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: '#6B7280' }}>
               Already verified?{' '}

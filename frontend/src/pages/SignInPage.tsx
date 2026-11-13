@@ -253,9 +253,20 @@ export const SignInPage: React.FC = () => {
           <div className="alert-error" style={{ marginBottom: '16px' }}>
             <div>{error}</div>
             {error.toLowerCase().includes('verification') && (
-              <div style={{ marginTop: '6px' }}>
-                <Link to="/verify-email" style={{ color: '#0D6E64', fontWeight: 600, textDecoration: 'underline' }}>
-                  Verify email or resend link &rarr;
+              <div style={{ marginTop: '8px' }}>
+                <Link
+                  to={`/verify-email?email=${encodeURIComponent(email)}`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: 'var(--primary-teal)',
+                    fontWeight: 600,
+                    textDecoration: 'underline'
+                  }}
+                >
+                  <span>Activate account with one click</span>
+                  <span>&rarr;</span>
                 </Link>
               </div>
             )}

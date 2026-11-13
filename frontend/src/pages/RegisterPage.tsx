@@ -37,8 +37,8 @@ export const RegisterPage: React.FC = () => {
         password,
       });
 
-      // Redirect to sign in with success message state
-      navigate('/login', { state: { registered: true } });
+      // Redirect to verification with pre-filled email for instant one-click activation
+      navigate(`/verify-email?email=${encodeURIComponent(email.trim())}`, { state: { registered: true } });
     } catch (err) {
       if (err instanceof ApiException) {
         if (err.status === 409) {
