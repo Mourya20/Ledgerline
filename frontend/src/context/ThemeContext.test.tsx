@@ -12,7 +12,6 @@ const ThemeTester: React.FC = () => {
       <span data-testid="current-theme">{theme}</span>
       <button onClick={toggleTheme}>Toggle</button>
       <button onClick={() => setMode('dark')}>SetDark</button>
-      <button onClick={() => setMode('system')}>SetSystem</button>
       <ThemeToggle variant="switch" />
       <ThemeToggle variant="segmented" />
     </div>
@@ -30,15 +29,15 @@ describe('ThemeContext and ThemeToggle', () => {
     cleanup();
   });
 
-  it('defaults to system mode on first load', () => {
+  it('defaults to light mode on first load', () => {
     render(
       <ThemeProvider>
         <ThemeTester />
       </ThemeProvider>
     );
 
-    expect(screen.getByTestId('current-mode').textContent).toBe('system');
-    expect(document.documentElement.getAttribute('data-theme')).toBeTruthy();
+    expect(screen.getByTestId('current-mode').textContent).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
   it('toggles between light and dark theme on click', () => {
@@ -60,7 +59,7 @@ describe('ThemeContext and ThemeToggle', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
-  it('allows explicit mode setting (system, dark, light)', () => {
+  it('allows explicit light and dark mode setting', () => {
     render(
       <ThemeProvider>
         <ThemeTester />
@@ -72,9 +71,19 @@ describe('ThemeContext and ThemeToggle', () => {
     expect(screen.getByTestId('current-theme').textContent).toBe('dark');
     expect(localStorage.getItem('vaultora_theme_mode')).toBe('dark');
 
-    fireEvent.click(screen.getByText('SetSystem'));
-    expect(screen.getByTestId('current-mode').textContent).toBe('system');
-    expect(localStorage.getItem('vaultora_theme_mode')).toBe('system');
+  });
+
+  it('falls back to light mode when a removed system preference is stored', () => {
+    localStorage.setItem('vaultora_theme_mode', 'system');
+
+    render(
+      <ThemeProvider>
+        <ThemeTester />
+      </ThemeProvider>
+    );
+
+    expect(screen.getByTestId('current-mode').textContent).toBe('light');
+    expect(screen.getByTestId('current-theme').textContent).toBe('light');
   });
 
   it('restores stored mode from localStorage on load', () => {
