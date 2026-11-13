@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ApiException } from '../api/client';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export const SignInPage: React.FC = () => {
   const { login } = useAuth();
@@ -66,18 +67,23 @@ export const SignInPage: React.FC = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#F8FAFC',
+      backgroundColor: 'var(--bg-page)',
+      color: 'var(--text-main)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '40px 24px',
+      padding: '70px 24px 40px',
       position: 'relative'
     }}>
-      {/* Top Left Brand Title */}
+      {/* Top Header Bar with Brand & Theme Toggle */}
       <header style={{
         position: 'absolute',
-        top: '24px',
+        top: '20px',
         left: '28px',
+        right: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         zIndex: 10
       }}>
         <Link
@@ -85,7 +91,7 @@ export const SignInPage: React.FC = () => {
           style={{
             fontSize: '22px',
             fontWeight: 800,
-            color: '#0F172A',
+            color: 'var(--text-main)',
             textDecoration: 'none',
             letterSpacing: '-0.03em',
             display: 'inline-flex',
@@ -109,6 +115,7 @@ export const SignInPage: React.FC = () => {
           </span>
           Vaultora
         </Link>
+        <ThemeToggle variant="pill" />
       </header>
 
       {/* Main Home Responsive Layout */}
@@ -144,7 +151,7 @@ export const SignInPage: React.FC = () => {
             fontSize: '32px',
             fontWeight: 800,
             lineHeight: 1.2,
-            color: '#0F172A',
+            color: 'var(--text-main)',
             letterSpacing: '-0.03em',
             marginBottom: '14px'
           }}>
@@ -153,7 +160,7 @@ export const SignInPage: React.FC = () => {
 
           <p style={{
             fontSize: '15px',
-            color: '#475569',
+            color: 'var(--text-muted)',
             lineHeight: 1.6,
             marginBottom: '28px'
           }}>
@@ -166,8 +173,8 @@ export const SignInPage: React.FC = () => {
                 width: '34px',
                 height: '34px',
                 borderRadius: '8px',
-                backgroundColor: '#ECFDF5',
-                color: '#0D6E64',
+                backgroundColor: 'var(--primary-teal-light)',
+                color: 'var(--primary-teal)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -177,8 +184,8 @@ export const SignInPage: React.FC = () => {
                 ⚖️
               </div>
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Mathematical Zero-Sum Balance</div>
-                <div style={{ fontSize: '13px', color: '#64748B' }}>Every transfer balances debits against credits with database trigger verification.</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Mathematical Zero-Sum Balance</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Every transfer balances debits against credits with database trigger verification.</div>
               </div>
             </div>
 
@@ -187,8 +194,8 @@ export const SignInPage: React.FC = () => {
                 width: '34px',
                 height: '34px',
                 borderRadius: '8px',
-                backgroundColor: '#EFF6FF',
-                color: '#2563EB',
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                color: '#3B82F6',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -198,8 +205,8 @@ export const SignInPage: React.FC = () => {
                 🔒
               </div>
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Maker-Checker Dual Governance</div>
-                <div style={{ fontSize: '13px', color: '#64748B' }}>High-value movements and reversals require dual-authorization review.</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Maker-Checker Dual Governance</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>High-value movements and reversals require dual-authorization review.</div>
               </div>
             </div>
 
@@ -208,8 +215,8 @@ export const SignInPage: React.FC = () => {
                 width: '34px',
                 height: '34px',
                 borderRadius: '8px',
-                backgroundColor: '#F5F3FF',
-                color: '#7C3AED',
+                backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                color: '#A855F7',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -219,8 +226,8 @@ export const SignInPage: React.FC = () => {
                 📋
               </div>
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Auditor Portal & Invariant Proof</div>
-                <div style={{ fontSize: '13px', color: '#64748B' }}>Real-time immutable audit trail with formula-safe CSV and PDF statement exports.</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Auditor Portal & Invariant Proof</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Real-time immutable audit trail with formula-safe CSV and PDF statement exports.</div>
               </div>
             </div>
           </div>
@@ -228,8 +235,8 @@ export const SignInPage: React.FC = () => {
 
         {/* Right Side: Sign-In Card */}
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', boxShadow: '0 4px 16px rgba(0, 0, 0, 0.05)' }}>
-        <div style={{ fontSize: '13px', color: '#6B7280', fontWeight: 500, marginBottom: '6px' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 500, marginBottom: '6px' }}>
           Vaultora
         </div>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '24px' }}>
@@ -310,7 +317,7 @@ export const SignInPage: React.FC = () => {
 
         {/* Sample Roles Quick Fill */}
         <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #E5E7EB' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#6B7280', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Quick Sign-In Samples
           </div>
 
@@ -321,13 +328,13 @@ export const SignInPage: React.FC = () => {
               justifyContent: 'space-between',
               padding: '8px 12px',
               borderRadius: '6px',
-              backgroundColor: '#F9FAFB',
-              border: '1px solid #E5E7EB',
+              backgroundColor: 'var(--border-subtle)',
+              border: '1px solid var(--border-color)',
               fontSize: '12px'
             }}>
               <div>
-                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Customer</span>
-                <code style={{ fontSize: '11px', color: '#4B5563' }}>customer1@ledgerline.com</code>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', marginRight: '6px' }}>Customer</span>
+                <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>customer1@ledgerline.com</code>
               </div>
               <button
                 type="button"
@@ -336,8 +343,8 @@ export const SignInPage: React.FC = () => {
                 style={{
                   fontSize: '11px',
                   fontWeight: 600,
-                  color: '#0D6E64',
-                  backgroundColor: '#E6F4F1',
+                  color: 'var(--primary-teal)',
+                  backgroundColor: 'var(--primary-teal-light)',
                   border: 'none',
                   padding: '3px 10px',
                   borderRadius: '4px',
@@ -354,13 +361,13 @@ export const SignInPage: React.FC = () => {
               justifyContent: 'space-between',
               padding: '8px 12px',
               borderRadius: '6px',
-              backgroundColor: '#F9FAFB',
-              border: '1px solid #E5E7EB',
+              backgroundColor: 'var(--border-subtle)',
+              border: '1px solid var(--border-color)',
               fontSize: '12px'
             }}>
               <div>
-                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Auditor</span>
-                <code style={{ fontSize: '11px', color: '#4B5563' }}>auditor1@ledgerline.com</code>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', marginRight: '6px' }}>Auditor</span>
+                <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>auditor1@ledgerline.com</code>
               </div>
               <button
                 type="button"
@@ -387,13 +394,13 @@ export const SignInPage: React.FC = () => {
               justifyContent: 'space-between',
               padding: '8px 12px',
               borderRadius: '6px',
-              backgroundColor: '#F9FAFB',
-              border: '1px solid #E5E7EB',
+              backgroundColor: 'var(--border-subtle)',
+              border: '1px solid var(--border-color)',
               fontSize: '12px'
             }}>
               <div>
-                <span style={{ fontWeight: 600, color: '#0F172A', marginRight: '6px' }}>Administrator</span>
-                <code style={{ fontSize: '11px', color: '#4B5563' }}>admin1@ledgerline.com</code>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', marginRight: '6px' }}>Administrator</span>
+                <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>admin1@ledgerline.com</code>
               </div>
               <button
                 type="button"
@@ -402,7 +409,7 @@ export const SignInPage: React.FC = () => {
                 style={{
                   fontSize: '11px',
                   fontWeight: 600,
-                  color: '#7C2D12',
+                  color: '#C2410C',
                   backgroundColor: '#FFEDD5',
                   border: 'none',
                   padding: '3px 10px',

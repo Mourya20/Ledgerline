@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PublicRoute } from './components/PublicRoute';
 import { AppLayout } from './components/layout/AppLayout';
@@ -47,9 +48,10 @@ const RootRedirect: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
           {/* Public Authentication Routes */}
           <Route
             path="/login"
@@ -135,7 +137,8 @@ export const App: React.FC = () => {
         </Routes>
       </AuthProvider>
     </BrowserRouter>
-  );
+  </ThemeProvider>
+);
 };
 
 export default App;

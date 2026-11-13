@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { authApi } from '../api/auth';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -83,17 +84,28 @@ export const VerifyEmailPage: React.FC = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#F7F8FA',
+      backgroundColor: 'var(--bg-page)',
+      color: 'var(--text-main)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '24px',
+      padding: '70px 24px 24px',
       position: 'relative'
     }}>
-      <header style={{ position: 'absolute', top: '24px', left: '28px', zIndex: 10 }}>
-        <Link to="/" style={{ fontSize: '20px', fontWeight: 700, color: '#111827', textDecoration: 'none', letterSpacing: '-0.02em' }}>
+      <header style={{
+        position: 'absolute',
+        top: '20px',
+        left: '28px',
+        right: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        zIndex: 10
+      }}>
+        <Link to="/" style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-main)', textDecoration: 'none', letterSpacing: '-0.02em' }}>
           Vaultora
         </Link>
+        <ThemeToggle variant="pill" />
       </header>
 
       <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '32px' }}>

@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { PortalSwitcher } from '../PortalSwitcher';
 import { ChangePasswordModal } from '../ChangePasswordModal';
+import { ThemeToggle } from '../ThemeToggle';
 
 export const AppLayout: React.FC = () => {
   const { logout, user } = useAuth();
@@ -37,22 +38,25 @@ export const AppLayout: React.FC = () => {
           style={{
             fontWeight: 700,
             fontSize: '18px',
-            color: '#111827',
+            color: 'var(--text-main)',
             letterSpacing: '-0.02em',
             textDecoration: 'none'
           }}
         >
           Vaultora
         </Link>
-        <button
-          type="button"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="mobile-menu-btn"
-          aria-label="Toggle navigation menu"
-          aria-expanded={mobileMenuOpen}
-        >
-          {mobileMenuOpen ? '✕' : '☰'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ThemeToggle variant="icon" />
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="mobile-menu-btn"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? '✕' : '☰'}
+          </button>
+        </div>
       </header>
 
       {/* Sidebar (Desktop persistent, Mobile toggleable drawer) */}
@@ -96,6 +100,9 @@ export const AppLayout: React.FC = () => {
               {user.email}
             </div>
           )}
+          <div style={{ marginBottom: '8px' }}>
+            <ThemeToggle variant="button" />
+          </div>
           <button
             type="button"
             onClick={() => setPasswordModalOpen(true)}
@@ -104,9 +111,9 @@ export const AppLayout: React.FC = () => {
               textAlign: 'left',
               padding: '7px 12px',
               fontSize: '13px',
-              color: '#374151',
-              backgroundColor: '#F9FAFB',
-              border: '1px solid #E5E7EB',
+              color: 'var(--text-main)',
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
               borderRadius: '6px',
               cursor: 'pointer',
               marginBottom: '8px',

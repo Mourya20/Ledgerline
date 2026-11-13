@@ -1,6 +1,10 @@
 import type { ApiError } from './types';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const envBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+// When hosted on Vercel (*.vercel.app), force relative empty string '' so Vercel rewrites proxy all /api requests as same-origin (first-party)
+const BASE_URL = typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app')
+  ? ''
+  : envBaseUrl;
 
 let cachedCsrfToken: string | null = null;
 

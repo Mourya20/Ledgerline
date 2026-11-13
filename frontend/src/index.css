@@ -26,6 +26,29 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
+[data-theme="dark"] {
+  --bg-page: #0B0F19;
+  --bg-card: #111827;
+  --bg-sidebar: #0F172A;
+  --text-main: #F9FAFB;
+  --text-muted: #9CA3AF;
+  --text-subtle: #6B7280;
+  --primary-teal: #14B8A6;
+  --primary-teal-hover: #2DD4BF;
+  --primary-teal-light: #132E2B;
+  --primary-teal-border: #0F766E;
+  --border-color: #1F2937;
+  --border-focus: #14B8A6;
+  --border-subtle: #1E293B;
+  --danger-bg: #450A0A;
+  --danger-border: #7F1D1D;
+  --danger-text: #FCA5A5;
+  --success-bg: #064E3B;
+  --success-border: #047857;
+  --success-text: #6EE7B7;
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -359,3 +382,139 @@ input, select, textarea {
     overflow-x: hidden;
   }
 }
+
+/* ==========================================================================
+   Dark Mode Component Rules & Invariant Overrides
+   ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-theme="dark"] body {
+  background-color: var(--bg-page);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .card {
+  background-color: var(--bg-card);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .sidebar {
+  background-color: var(--bg-sidebar);
+  border-color: var(--border-color);
+}
+
+[data-theme="dark"] .mobile-header {
+  background-color: var(--bg-sidebar);
+  border-color: var(--border-color);
+}
+
+[data-theme="dark"] .sidebar-brand a,
+[data-theme="dark"] .mobile-header a {
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .mobile-menu-btn {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .mobile-menu-btn:hover {
+  background-color: #1E293B;
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .sidebar-link {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .sidebar-link:hover {
+  background-color: #1E293B;
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .sidebar-link.active {
+  color: var(--primary-teal);
+  background-color: var(--primary-teal-light);
+}
+
+[data-theme="dark"] .sidebar-logout {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .sidebar-logout:hover {
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] textarea {
+  background-color: #1F2937;
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .form-input:focus,
+[data-theme="dark"] .form-select:focus,
+[data-theme="dark"] textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
+}
+
+[data-theme="dark"] .form-input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--text-subtle);
+}
+
+[data-theme="dark"] .form-input:disabled,
+[data-theme="dark"] .form-select:disabled {
+  background-color: #111827;
+  border-color: #374151;
+  color: var(--text-subtle);
+}
+
+[data-theme="dark"] .form-label {
+  color: #D1D5DB;
+}
+
+[data-theme="dark"] .btn-outline {
+  background-color: transparent;
+  color: var(--primary-teal);
+  border-color: var(--primary-teal);
+}
+
+[data-theme="dark"] .btn-outline:hover:not(:disabled) {
+  background-color: var(--primary-teal-light);
+}
+
+[data-theme="dark"] .badge-active {
+  background-color: #1E293B;
+  color: #E5E7EB;
+}
+
+[data-theme="dark"] table th {
+  background-color: #1E293B !important;
+  color: #F3F4F6 !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="dark"] table td {
+  border-color: #374151 !important;
+  color: #E5E7EB !important;
+}
+
+[data-theme="dark"] table tr:hover td {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+[data-theme="dark"] code {
+  background-color: #1E293B;
+  color: #5EEAD4;
+}
+
+[data-theme="dark"] select option {
+  background-color: #1F2937;
+  color: #F9FAFB;
+}
+

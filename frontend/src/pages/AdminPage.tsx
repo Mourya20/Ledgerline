@@ -21,6 +21,7 @@ import type {
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { PortalSwitcher } from '../components/PortalSwitcher';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const DEMO_CUSTOMERS = [
   'customer1@ledgerline.com',
@@ -939,10 +940,11 @@ export const AdminPage: React.FC = () => {
             Change password
           </button>
           {user && (
-            <span style={{ fontSize: '13px', color: '#4B5563' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {user.email}
             </span>
           )}
+          <ThemeToggle variant="pill" />
           <button
             type="button"
             onClick={handleLogout}

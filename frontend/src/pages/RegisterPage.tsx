@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ApiException } from '../api/client';
 import { validateRegistrationPassword } from '../utils/validation';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export const RegisterPage: React.FC = () => {
   const { register } = useAuth();
@@ -42,6 +43,10 @@ export const RegisterPage: React.FC = () => {
       if (err instanceof ApiException) {
         if (err.status === 409) {
           setError('An account with this email already exists.');
+        } else if (err.status === 401) {
+          setError('Session or CSRF validation expired. Please refresh and try again.');
+        } else if (err.status === 400) {
+          setError(err.message || 'Invalid registration details. Ensure password is at least 12 characters.');
         } else {
           setError(err.message || 'Registration failed. Please try again.');
         }
@@ -56,18 +61,23 @@ export const RegisterPage: React.FC = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#F7F8FA',
+      backgroundColor: 'var(--bg-page)',
+      color: 'var(--text-main)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '24px',
+      padding: '70px 24px 24px',
       position: 'relative'
     }}>
-      {/* Top Left Brand Title linking to Home */}
+      {/* Top Header Bar with Brand & Theme Toggle */}
       <header style={{
         position: 'absolute',
-        top: '24px',
+        top: '20px',
         left: '28px',
+        right: '28px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         zIndex: 10
       }}>
         <Link
@@ -75,7 +85,7 @@ export const RegisterPage: React.FC = () => {
           style={{
             fontSize: '20px',
             fontWeight: 700,
-            color: '#111827',
+            color: 'var(--text-main)',
             textDecoration: 'none',
             letterSpacing: '-0.02em',
             display: 'inline-flex',
@@ -84,13 +94,14 @@ export const RegisterPage: React.FC = () => {
         >
           Vaultora
         </Link>
+        <ThemeToggle variant="pill" />
       </header>
 
       <div className="card" style={{ width: '100%', maxWidth: '380px', padding: '32px' }}>
-        <div style={{ fontSize: '13px', color: '#6B7280', fontWeight: 500, marginBottom: '6px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 500, marginBottom: '6px' }}>
           Vaultora
         </div>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '24px' }}>
           Create account
         </h1>
 
@@ -129,6 +140,9 @@ export const RegisterPage: React.FC = () => {
               autoComplete="new-password"
               required
             />
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              Minimum 12 characters required
+            </div>
           </div>
 
           <div className="form-group">
@@ -156,9 +170,9 @@ export const RegisterPage: React.FC = () => {
           </button>
         </form>
 
-        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: '#4B5563' }}>
+        <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
           Already have an account?{' '}
-          <Link to="/login" style={{ color: '#0D6E64', fontWeight: 500 }}>
+          <Link to="/login" style={{ color: 'var(--primary-teal)', fontWeight: 500 }}>
             Sign in
           </Link>
         </div>
