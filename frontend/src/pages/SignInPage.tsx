@@ -66,14 +66,14 @@ export const SignInPage: React.FC = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      backgroundColor: '#F7F8FA',
+      backgroundColor: '#F8FAFC',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '24px',
+      padding: '40px 24px',
       position: 'relative'
     }}>
-      {/* Top Left Brand Title linking to Home */}
+      {/* Top Left Brand Title */}
       <header style={{
         position: 'absolute',
         top: '24px',
@@ -83,20 +83,167 @@ export const SignInPage: React.FC = () => {
         <Link
           to="/"
           style={{
-            fontSize: '20px',
-            fontWeight: 700,
-            color: '#111827',
+            fontSize: '22px',
+            fontWeight: 800,
+            color: '#0F172A',
             textDecoration: 'none',
-            letterSpacing: '-0.02em',
+            letterSpacing: '-0.03em',
             display: 'inline-flex',
-            alignItems: 'center'
+            alignItems: 'center',
+            gap: '8px'
           }}
         >
+          <span style={{
+            width: '28px',
+            height: '28px',
+            borderRadius: '6px',
+            backgroundColor: '#0D6E64',
+            color: '#FFFFFF',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '14px',
+            fontWeight: 700
+          }}>
+            V
+          </span>
           Vaultora
         </Link>
       </header>
 
-      <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '32px' }}>
+      {/* Main Home Responsive Layout */}
+      <div style={{
+        width: '100%',
+        maxWidth: '1060px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+        gap: '48px',
+        alignItems: 'center',
+        marginTop: '32px'
+      }}>
+        {/* Left Side: Static Home Branding & Architecture Highlights */}
+        <div style={{ padding: '12px 0' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: '#E6F4F1',
+            color: '#0D6E64',
+            padding: '4px 12px',
+            borderRadius: '9999px',
+            fontSize: '12px',
+            fontWeight: 600,
+            marginBottom: '16px',
+            letterSpacing: '0.02em'
+          }}>
+            <span>🛡️</span>
+            <span>CORE BANKING & DOUBLE-ENTRY LEDGER</span>
+          </div>
+
+          <h2 style={{
+            fontSize: '32px',
+            fontWeight: 800,
+            lineHeight: 1.2,
+            color: '#0F172A',
+            letterSpacing: '-0.03em',
+            marginBottom: '14px'
+          }}>
+            Institutional financial engineering with zero-sum precision.
+          </h2>
+
+          <p style={{
+            fontSize: '15px',
+            color: '#475569',
+            lineHeight: 1.6,
+            marginBottom: '28px'
+          }}>
+            Vaultora enforces strict mathematical balance invariants, transaction-scoped advisory locks, and non-repudiable audit logs across all financial movements.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <div style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                backgroundColor: '#ECFDF5',
+                color: '#0D6E64',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                flexShrink: 0
+              }}>
+                ⚖️
+              </div>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Mathematical Zero-Sum Balance</div>
+                <div style={{ fontSize: '13px', color: '#64748B' }}>Every transfer balances debits against credits with database trigger verification.</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <div style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                backgroundColor: '#EFF6FF',
+                color: '#2563EB',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                flexShrink: 0
+              }}>
+                🔒
+              </div>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Maker-Checker Dual Governance</div>
+                <div style={{ fontSize: '13px', color: '#64748B' }}>High-value movements and reversals require dual-authorization review.</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <div style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                backgroundColor: '#F5F3FF',
+                color: '#7C3AED',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                flexShrink: 0
+              }}>
+                📋
+              </div>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A' }}>Auditor Portal & Invariant Proof</div>
+                <div style={{ fontSize: '13px', color: '#64748B' }}>Real-time immutable audit trail with formula-safe CSV and PDF statement exports.</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '12px',
+            color: '#059669',
+            backgroundColor: '#F0FDF4',
+            border: '1px solid #BBF7D0',
+            padding: '6px 12px',
+            borderRadius: '6px'
+          }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block' }} />
+            <span style={{ fontWeight: 600 }}>System Live</span> &bull; 100% Invariant Compliant &bull; Vercel + Render + Supabase
+          </div>
+        </div>
+
+        {/* Right Side: Sign-In Card */}
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', boxShadow: '0 4px 16px rgba(0, 0, 0, 0.05)' }}>
         <div style={{ fontSize: '13px', color: '#6B7280', fontWeight: 500, marginBottom: '6px' }}>
           Vaultora
         </div>
@@ -283,7 +430,9 @@ export const SignInPage: React.FC = () => {
             </div>
           </div>
         </div>
+        </div>
       </div>
+    </div>
     </div>
   );
 };

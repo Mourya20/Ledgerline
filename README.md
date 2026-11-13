@@ -19,7 +19,10 @@ Phase 3 introduced the responsive React + Vite + TypeScript frontend, implementi
 - Customer account-opening approval queues with live admin synchronization and polling.
 - Official account statement downloads in PDF (`%PDF-1.4`) and CSV (with spreadsheet formula injection defense).
 - Real-time Auditor inspection portal with multi-criteria transaction filtering, formula-sanitized CSV export, and complete Ledger Integrity verification.
-- Interactive OpenAPI / Swagger 3 documentation (`/swagger-ui.html`).
+- Interactive OpenAPI / Swagger 3 documentation (`/swagger-ui.html`) with relative host detection.
+- Customer Real-Time Transaction Alerts (floating confirmation toasts and detailed receipts for deposit, withdrawal, and transfer).
+- Admin Real-Time Request Notification Center (interactive header bell, live pending count badge, dropdown summary, and background polling toasts).
+- Enhanced Landing Page (home branding, architecture highlights, and invariant verification indicators).
 
 > [!NOTE]
 > **Operational Disclaimer**: Vaultora is a secure banking simulation engineered to model production-grade financial architecture. The deposit and withdrawal endpoints represent simulated external cash-in and cash-out operations against an internal system cash vault (`SYS-INR-CASH-VAULT-001`). They are not connected to real external payment gateways or banking rails. The system currently operates with Indian Rupee (`INR`) as the authoritative currency.
@@ -652,15 +655,19 @@ The platform is engineered for cloud deployment across the following topology:
 5. Deploy the service. Verify that `https://<YOUR_RENDER_SERVICE>.onrender.com/actuator/health` returns `{"status": "UP"}`.
 
 #### Step 3: Deploy Frontend to Vercel
-1. In Vercel, select **Add New > Project** and import the repository.
+1. In Vercel, select **Add New > Project** and import the repository (`https://github.com/Mourya20/vaultora-banking.git`).
 2. Configure project settings:
    - **Root Directory**: `frontend`
    - **Framework Preset**: `Vite`
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
 3. Environment Variables:
-   - `VITE_API_BASE_URL`: `https://<YOUR_RENDER_SERVICE>.onrender.com` (or leave blank if utilizing Vercel rewrites proxy)
-4. Deploy. Vercel automatically deploys the SPA with routing handled by `frontend/vercel.json`.
+   - `VITE_API_BASE_URL`: `https://vaultora-banking.onrender.com` (Render production API URL)
+4. Deploy. Vercel automatically builds and deploys the SPA with client-side routing handled by `frontend/vercel.json` (`"rewrites": [{ "source": "/(.*)", "destination": "/" }]`) and `frontend/public/_redirects`.
+5. **Continuous Deployment Workflow**:
+   - Every `git push origin main` to GitHub automatically triggers a new deployment build on Vercel within ~30 seconds.
+   - Alternatively, to trigger a redeploy from the Vercel Dashboard: Go to **Deployments** &rarr; select the active deployment &rarr; click **...** &rarr; **Redeploy**.
+   - If using the Vercel CLI locally: `cd frontend && npx vercel --prod`.
 
 #### Step 4: Production Environment Variable Reference Matrix
 

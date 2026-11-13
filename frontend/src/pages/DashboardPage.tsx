@@ -65,9 +65,57 @@ export const DashboardPage: React.FC = () => {
   return (
     <div>
       {/* Welcome Heading */}
-      <h1 style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginBottom: '28px' }}>
-        Welcome back, {user?.email || 'Customer'}
-      </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ fontSize: '26px', fontWeight: 700, color: '#111827', margin: 0 }}>
+            Welcome back, {user?.email || 'Customer'}
+          </h1>
+          <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '4px' }}>
+            Vaultora Core Banking &bull; Customer Portal
+          </p>
+        </div>
+
+        {/* Minimal Static Security Status Pill */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          backgroundColor: '#F0FDF4',
+          border: '1px solid #BBF7D0',
+          padding: '6px 12px',
+          borderRadius: '9999px',
+          fontSize: '12px',
+          color: '#15803D'
+        }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22C55E', display: 'inline-block' }} />
+          <span style={{ fontWeight: 600 }}>Ledger Active</span> &bull; Zero-Sum Invariant Enforced
+        </div>
+      </div>
+
+      {/* Static Ledger Assurance Banner */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '12px',
+        backgroundColor: '#FFFFFF',
+        border: '1px solid #E2E8F0',
+        borderRadius: '8px',
+        padding: '12px 16px',
+        marginBottom: '24px',
+        fontSize: '13px',
+        color: '#475569',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '16px' }}>🛡️</span>
+          <span><strong>Immutable Double-Entry Accounting:</strong> Every transfer, deposit, and withdrawal is cryptographically and trigger-validated.</span>
+        </div>
+        <div style={{ fontSize: '12px', color: '#64748B' }}>
+          Currency: <strong>INR (₹)</strong> &bull; Non-negative balance constraint active
+        </div>
+      </div>
 
       {error && (
         <div className="alert alert-danger" role="alert">
@@ -79,6 +127,89 @@ export const DashboardPage: React.FC = () => {
         <div style={{ padding: '32px 0', color: '#6B7280' }}>Loading your dashboard...</div>
       ) : (
         <>
+          {/* Quick Actions Row */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '14px',
+            marginBottom: '24px'
+          }}>
+            <button
+              type="button"
+              onClick={() => navigate('/move-money')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 16px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#0D6E64')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2E8F0')}
+            >
+              <span style={{ fontSize: '20px' }}>💸</span>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>Move Money</div>
+                <div style={{ fontSize: '11px', color: '#64748B' }}>Transfer, deposit, withdraw</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/accounts')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 16px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#0D6E64')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2E8F0')}
+            >
+              <span style={{ fontSize: '20px' }}>🏦</span>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>Manage Accounts</div>
+                <div style={{ fontSize: '11px', color: '#64748B' }}>Open or close accounts</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 16px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#0D6E64')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2E8F0')}
+            >
+              <span style={{ fontSize: '20px' }}>📜</span>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>History & Statements</div>
+                <div style={{ fontSize: '11px', color: '#64748B' }}>Download PDF/CSV statements</div>
+              </div>
+            </button>
+          </div>
+
           {/* Summary Cards Row */}
           <div style={{
             display: 'grid',

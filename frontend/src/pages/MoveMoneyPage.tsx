@@ -76,6 +76,27 @@ export const MoveMoneyPage: React.FC = () => {
   // Notifications
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // High-Visibility Floating Confirmation Alert
+  interface TransactionReceiptAlert {
+    type: 'success' | 'error';
+    title: string;
+    message: string;
+    actionType: 'Deposit' | 'Withdrawal' | 'Transfer';
+    amount?: number;
+    sourceAccount?: string;
+    destinationAccount?: string;
+    timestamp: string;
+  }
+  const [activeAlert, setActiveAlert] = useState<TransactionReceiptAlert | null>(null);
+
+  useEffect(() => {
+    if (!activeAlert) return;
+    const timer = setTimeout(() => {
+      setActiveAlert(null);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [activeAlert]);
+
   const fetchAccounts = async () => {
     try {
       const data = await accountsApi.getAccounts();
@@ -168,40 +189,89 @@ export const MoveMoneyPage: React.FC = () => {
       clearStoredIntent('deposit');
       setDepositIntent(null);
       setDepositAmount('');
+      const targetAcc = accounts.find((a) => a.id === depositAccountId);
+      const successMsg = `Successfully deposited ${formatCurrency(amt)} into account ${targetAcc ? targetAcc.accountNumber : ''}.`;
       setNotification({
         type: 'success',
-        message: `Successfully deposited ${formatCurrency(amt)} into your account.`,
+        message: successMsg,
       });
+      setActiveAlert({
+        type: 'success',
+        title: 'Deposit Successful',
+        message: successMsg,
+        actionType: 'Deposit',
+        amount: amt,
+        sourceAccount: targetAcc ? targetAcc.accountNumber : undefined,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       await fetchAccounts();
     } catch (err: unknown) {
       if (err instanceof ApiException) {
         if (err.status === 409) {
+          const errMsg = 'Idempotency conflict: this operation was already processed with different parameters.';
           setNotification({
             type: 'error',
-            message: 'Idempotency conflict: this operation was already processed with different parameters.',
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Deposit Conflict',
+            message: errMsg,
+            actionType: 'Deposit',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else if (err.status >= 500) {
           markIntentUncertain('deposit', preparedIntent, err.message);
           setDepositIntent(getStoredIntent('deposit'));
+          const errMsg = `Server error encountered (${err.message}). The transaction intent has been preserved. You can safely retry.`;
           setNotification({
             type: 'error',
-            message: `Server error encountered (${err.message}). The transaction intent has been preserved. You can safely retry.`,
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Deposit Preserved (Server Error)',
+            message: errMsg,
+            actionType: 'Deposit',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else {
           // Client errors 400, 422, etc. do not commit
           clearStoredIntent('deposit');
           setDepositIntent(null);
-          setNotification({ type: 'error', message: err.message || 'Deposit failed.' });
+          const errMsg = err.message || 'Deposit failed.';
+          setNotification({ type: 'error', message: errMsg });
+          setActiveAlert({
+            type: 'error',
+            title: 'Deposit Rejected',
+            message: errMsg,
+            actionType: 'Deposit',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          });
         }
       } else {
         // Network timeout / connection lost: UNCERTAIN
         markIntentUncertain('deposit', preparedIntent, 'Network timeout / connection lost');
         setDepositIntent(getStoredIntent('deposit'));
+        const errMsg = 'Network connection lost. The deposit intent has been preserved. Please retry to safely resolve.';
         setNotification({
           type: 'error',
-          message: 'Network connection lost. The deposit intent has been preserved. Please retry to safely resolve.',
+          message: errMsg,
+        });
+        setActiveAlert({
+          type: 'error',
+          title: 'Deposit Network Disruption',
+          message: errMsg,
+          actionType: 'Deposit',
+          amount: amt,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         });
       }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setDepositLoading(false);
     }
@@ -247,38 +317,86 @@ export const MoveMoneyPage: React.FC = () => {
       clearStoredIntent('withdraw');
       setWithdrawIntent(null);
       setWithdrawAmount('');
+      const successMsg = `Successfully withdrew ${formatCurrency(amt)} from account ${selectedWithdrawAccount ? selectedWithdrawAccount.accountNumber : ''}.`;
       setNotification({
         type: 'success',
-        message: `Successfully withdrew ${formatCurrency(amt)} from your account.`,
+        message: successMsg,
       });
+      setActiveAlert({
+        type: 'success',
+        title: 'Withdrawal Successful',
+        message: successMsg,
+        actionType: 'Withdrawal',
+        amount: amt,
+        sourceAccount: selectedWithdrawAccount ? selectedWithdrawAccount.accountNumber : undefined,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       await fetchAccounts();
     } catch (err: unknown) {
       if (err instanceof ApiException) {
         if (err.status === 409) {
+          const errMsg = 'Idempotency conflict: this operation was already processed with different parameters.';
           setNotification({
             type: 'error',
-            message: 'Idempotency conflict: this operation was already processed with different parameters.',
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Withdrawal Conflict',
+            message: errMsg,
+            actionType: 'Withdrawal',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else if (err.status >= 500) {
           markIntentUncertain('withdraw', preparedIntent, err.message);
           setWithdrawIntent(getStoredIntent('withdraw'));
+          const errMsg = `Server error encountered (${err.message}). The transaction intent has been preserved. You can safely retry.`;
           setNotification({
             type: 'error',
-            message: `Server error encountered (${err.message}). The transaction intent has been preserved. You can safely retry.`,
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Withdrawal Preserved (Server Error)',
+            message: errMsg,
+            actionType: 'Withdrawal',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else {
           clearStoredIntent('withdraw');
           setWithdrawIntent(null);
-          setNotification({ type: 'error', message: err.message || 'Withdrawal failed.' });
+          const errMsg = err.message || 'Withdrawal failed.';
+          setNotification({ type: 'error', message: errMsg });
+          setActiveAlert({
+            type: 'error',
+            title: 'Withdrawal Rejected',
+            message: errMsg,
+            actionType: 'Withdrawal',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          });
         }
       } else {
         markIntentUncertain('withdraw', preparedIntent, 'Network timeout / connection lost');
         setWithdrawIntent(getStoredIntent('withdraw'));
+        const errMsg = 'Network connection lost. The withdrawal intent has been preserved. Please retry to safely resolve.';
         setNotification({
           type: 'error',
-          message: 'Network connection lost. The withdrawal intent has been preserved. Please retry to safely resolve.',
+          message: errMsg,
+        });
+        setActiveAlert({
+          type: 'error',
+          title: 'Withdrawal Network Disruption',
+          message: errMsg,
+          actionType: 'Withdrawal',
+          amount: amt,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         });
       }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setWithdrawLoading(false);
     }
@@ -339,39 +457,88 @@ export const MoveMoneyPage: React.FC = () => {
       setShowTransferReview(false);
       setTransferAmount('');
       setTransferDestNumber('');
+      const successMsg = `Successfully transferred ${formatCurrency(amt)} to ${transferDestNumber.trim()}.`;
       setNotification({
         type: 'success',
-        message: `Successfully transferred ${formatCurrency(amt)} to ${transferDestNumber.trim()}.`,
+        message: successMsg,
       });
+      setActiveAlert({
+        type: 'success',
+        title: 'Transfer Completed',
+        message: successMsg,
+        actionType: 'Transfer',
+        amount: amt,
+        sourceAccount: selectedTransferSourceAccount ? selectedTransferSourceAccount.accountNumber : undefined,
+        destinationAccount: transferDestNumber.trim(),
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       await fetchAccounts();
     } catch (err: unknown) {
       setShowTransferReview(false);
       if (err instanceof ApiException) {
         if (err.status === 409) {
+          const errMsg = 'Idempotency conflict: this transfer was already submitted with different parameters.';
           setNotification({
             type: 'error',
-            message: 'Idempotency conflict: this transfer was already submitted with different parameters.',
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Transfer Conflict',
+            message: errMsg,
+            actionType: 'Transfer',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else if (err.status >= 500) {
           markIntentUncertain('transfer', preparedIntent, err.message);
           setTransferIntent(getStoredIntent('transfer'));
+          const errMsg = `Server error (${err.message}). The transfer intent has been preserved. You can safely retry.`;
           setNotification({
             type: 'error',
-            message: `Server error (${err.message}). The transfer intent has been preserved. You can safely retry.`,
+            message: errMsg,
+          });
+          setActiveAlert({
+            type: 'error',
+            title: 'Transfer Preserved (Server Error)',
+            message: errMsg,
+            actionType: 'Transfer',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           });
         } else {
           clearStoredIntent('transfer');
           setTransferIntent(null);
-          setNotification({ type: 'error', message: err.message || 'Transfer failed.' });
+          const errMsg = err.message || 'Transfer failed.';
+          setNotification({ type: 'error', message: errMsg });
+          setActiveAlert({
+            type: 'error',
+            title: 'Transfer Rejected',
+            message: errMsg,
+            actionType: 'Transfer',
+            amount: amt,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          });
         }
       } else {
         markIntentUncertain('transfer', preparedIntent, 'Network timeout / connection lost');
         setTransferIntent(getStoredIntent('transfer'));
+        const errMsg = 'Network connection lost during transfer. The intent has been preserved. You can safely retry.';
         setNotification({
           type: 'error',
-          message: 'Network connection lost during transfer. The intent has been preserved. You can safely retry.',
+          message: errMsg,
+        });
+        setActiveAlert({
+          type: 'error',
+          title: 'Transfer Network Disruption',
+          message: errMsg,
+          actionType: 'Transfer',
+          amount: amt,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         });
       }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setTransferLoading(false);
     }
@@ -387,6 +554,124 @@ export const MoveMoneyPage: React.FC = () => {
 
   return (
     <div>
+      {/* High-Visibility Floating Transaction Confirmation Toast Alert */}
+      {activeAlert && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 10000,
+            maxWidth: '440px',
+            width: 'calc(100% - 48px)',
+            backgroundColor: '#FFFFFF',
+            borderRadius: '12px',
+            border: activeAlert.type === 'success' ? '1px solid #10B981' : '1px solid #EF4444',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            overflow: 'hidden'
+          }}
+        >
+          {/* Top colored indicator line */}
+          <div style={{
+            height: '4px',
+            backgroundColor: activeAlert.type === 'success' ? '#10B981' : '#EF4444',
+            width: '100%'
+          }} />
+
+          <div style={{ padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  fontSize: '20px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  backgroundColor: activeAlert.type === 'success' ? '#ECFDF5' : '#FEF2F2',
+                  color: activeAlert.type === 'success' ? '#059669' : '#DC2626',
+                  fontWeight: 700
+                }}>
+                  {activeAlert.type === 'success' ? '✓' : '⚠️'}
+                </span>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>
+                    {activeAlert.title}
+                  </h4>
+                  <div style={{ fontSize: '12px', color: '#64748B' }}>
+                    {activeAlert.timestamp} &bull; Status: <strong>{activeAlert.type === 'success' ? 'COMPLETED' : 'FAILED'}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveAlert(null)}
+                aria-label="Close notification"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '20px',
+                  color: '#94A3B8',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  lineHeight: 1
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <p style={{
+              margin: '12px 0 0',
+              fontSize: '13px',
+              color: '#334155',
+              lineHeight: 1.5,
+              fontWeight: 500
+            }}>
+              {activeAlert.message}
+            </p>
+
+            {activeAlert.type === 'success' && activeAlert.amount !== undefined && (
+              <div style={{
+                marginTop: '12px',
+                padding: '10px 12px',
+                backgroundColor: '#F8FAFC',
+                borderRadius: '8px',
+                border: '1px solid #E2E8F0',
+                fontSize: '12px',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '8px'
+              }}>
+                <div>
+                  <span style={{ color: '#64748B' }}>Amount:</span>{' '}
+                  <strong style={{ color: '#0F172A', fontSize: '13px' }}>{formatCurrency(activeAlert.amount)}</strong>
+                </div>
+                <div>
+                  <span style={{ color: '#64748B' }}>Operation:</span>{' '}
+                  <strong style={{ color: '#0D6E64' }}>{activeAlert.actionType}</strong>
+                </div>
+                {activeAlert.sourceAccount && (
+                  <div style={{ gridColumn: activeAlert.destinationAccount ? 'auto' : 'span 2' }}>
+                    <span style={{ color: '#64748B' }}>Source Account:</span>{' '}
+                    <code style={{ color: '#334155', fontWeight: 600 }}>{activeAlert.sourceAccount}</code>
+                  </div>
+                )}
+                {activeAlert.destinationAccount && (
+                  <div>
+                    <span style={{ color: '#64748B' }}>Destination:</span>{' '}
+                    <code style={{ color: '#334155', fontWeight: 600 }}>{activeAlert.destinationAccount}</code>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <h1 style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginBottom: '28px' }}>
         Move money
       </h1>
@@ -395,8 +680,26 @@ export const MoveMoneyPage: React.FC = () => {
         <div
           className={`alert ${notification.type === 'success' ? 'alert-success' : 'alert-danger'}`}
           role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '14px 18px',
+            fontSize: '14px',
+            fontWeight: 500
+          }}
         >
-          {notification.message}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '18px' }}>{notification.type === 'success' ? '✅' : '⚠️'}</span>
+            <span>{notification.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotification(null)}
+            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'inherit', opacity: 0.7 }}
+          >
+            &times;
+          </button>
         </div>
       )}
 

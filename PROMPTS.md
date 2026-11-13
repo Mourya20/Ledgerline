@@ -1040,3 +1040,44 @@ Audit and resolve all ~25 reported workspace problems across frontend and backen
   - `VaultoraApplicationTests`: 1/1 passed.
 - **Frontend Test Suite**: **37 tests passed (100%)** across 8 test suites (`vitest run`).
 - **Linter & Compiler Status**: 0 errors, 0 warnings across frontend (`oxlint`) and backend (`javac`).
+
+---
+
+## 36. 2026-11-13 - Cloud Deployment, Customer Transaction Alerts, Admin Notification Center & Minimal UX Enhancements
+
+### Prompt & Context
+1. Resolve live cloud deployment issues across Supabase (managed PostgreSQL), Render (Spring Boot REST backend), and Vercel (React 19 SPA).
+2. Fix Swagger UI "Failed to fetch" on Render by making OpenAPI servers relative.
+3. Eliminate HTTP 401 error when navigating to root URL on Render by routing `/` to interactive Swagger UI.
+4. Export and push the complete local database (30 users, 40 accounts, 23 transactions, 46 ledger entries, 345 audit logs) to Supabase without constraint or trigger errors.
+5. Add high-visibility real-time transaction confirmation alerts for customer deposits, withdrawals, and peer transfers.
+6. Add real-time notification alerts (header bell badge, summary dropdown, and background polling toasts) for administrators when new account opening or maker-checker requests arrive.
+7. Implement minimal static design on the home landing page and customer portal without introducing new routes.
+8. Document the complete architecture and deployment instructions.
+
+### Architectural Decisions & Problem Resolution
+1. **OpenAPI Server Host Normalization & Root Redirect**:
+   - `OpenApiController.java` previously hardcoded `"url": "http://localhost:8080"` in the OpenAPI 3.1 server definition. When Swagger UI was loaded over HTTPS from Render (`https://vaultora-banking.onrender.com`), API executions failed with mixed-content CORS / network errors.
+   - Updated the OpenAPI server configuration to specify relative `"url": "/"` as the default auto-detect server, allowing Swagger UI to execute requests relative to the current host origin in any environment.
+   - Mapped `GET /` to `getSwaggerUi()` and added `"/"` to `requestMatchers(...).permitAll()` in `SecurityConfig.java`, redirecting root browser requests directly to Swagger UI instead of throwing HTTP 401 Unauthorized.
+2. **Supabase Bulk Data Migration (`scripts/supabase_push_local_db.sql`)**:
+   - In PostgreSQL, table `users` utilizes a functional expression index `(LOWER(email))`. Initial manual SQL inserts failed with `ERROR: 42P10: there is no unique or exclusion constraint matching the ON CONFLICT specification`.
+   - Generated a clean, standalone migration script containing all 491 local database records. Wrapped the import in `SET session_replication_role = 'replica';` to bypass foreign key circularities and trigger restrictions during restore, preceding insertion with `TRUNCATE ... CASCADE` and finishing with `SET session_replication_role = 'origin';`.
+3. **Customer Real-Time Transaction Alerts (`MoveMoneyPage.tsx`)**:
+   - Implemented a floating, elevated Transaction Confirmation Toast Alert positioned at `top: 24px; right: 24px; zIndex: 10000`.
+   - On deposit, withdrawal, or transfer completion, displays a detailed receipt card including action type, formatted amount in INR, source/destination accounts, timestamp, and transaction status (`COMPLETED`).
+   - Automatically scrolls the viewport to the top and dismisses after 8 seconds with manual close support.
+   - Distinct high-visibility red alert cards are displayed upon validation, balance, or network failures.
+4. **Admin Real-Time Notification Center (`AdminPage.tsx`)**:
+   - Added an interactive Notification Bell button in the admin header with a live badge displaying the total count of pending account requests and maker-checker tasks.
+   - Clicking the bell opens a dropdown summary showing pending request breakdowns with direct one-click navigation to the review queues.
+   - Integrated delta detection in the periodic 10-second background polling cycle (`fetchAccountRequests` and `fetchMakerChecker`), triggering floating toast alerts when new requests are received.
+5. **Static Minimal Home & Customer Portal UX Enhancements**:
+   - **Home Landing Page (`SignInPage.tsx`)**: Added a responsive two-column layout on desktop showcasing core architecture highlights (zero-sum ledger invariants, maker-checker governance, real-time auditability, and live deployment status) alongside the clean sign-in card without altering existing routes.
+   - **Customer Portal (`DashboardPage.tsx`)**: Added a double-entry ledger assurance banner and quick action shortcuts (Move Money, Manage Accounts, History & Statements).
+
+### Verification
+- Frontend test suite executed: **37/37 tests passed (100%)** (`vitest run`).
+- Frontend production build: `npm run build` completed in 204ms with zero errors.
+- Backend test suite: `151/151 tests passed (100%)`, compiler reported 0 warnings.
+- Clean Git working tree with changes committed and pushed to GitHub `main`.

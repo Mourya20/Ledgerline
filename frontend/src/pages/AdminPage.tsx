@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useId } from 'react';
+import React, { useEffect, useState, useCallback, useId, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { healthApi } from '../api/health';
@@ -101,6 +101,21 @@ export const AdminPage: React.FC = () => {
   const [limitsSuccess, setLimitsSuccess] = useState<string | null>(null);
   const [maxPerTxInput, setMaxPerTxInput] = useState<string>('500000');
   const [maxDailyInput, setMaxDailyInput] = useState<string>('2000000');
+
+  // Real-Time Admin Notification Center & Toast state
+  interface AdminNotificationToast {
+    id: string;
+    type: 'request' | 'maker-checker' | 'success';
+    title: string;
+    message: string;
+    actionTab?: AdminTab;
+    actionLabel?: string;
+    timestamp: string;
+  }
+  const [adminToasts, setAdminToasts] = useState<AdminNotificationToast[]>([]);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState<boolean>(false);
+  const prevPendingRequestsCountRef = useRef<number | null>(null);
+  const prevPendingMakerCheckerCountRef = useRef<number | null>(null);
 
   // Accounts state
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
@@ -226,6 +241,22 @@ export const AdminPage: React.FC = () => {
       setAccountRequestsError(null);
       const data = await accountRequestsApi.getRequests();
       setAccountRequests(data);
+
+      const pendingCount = data.filter((r) => r.status === 'PENDING').length;
+      if (prevPendingRequestsCountRef.current !== null && pendingCount > prevPendingRequestsCountRef.current) {
+        const diff = pendingCount - prevPendingRequestsCountRef.current;
+        const newToast: AdminNotificationToast = {
+          id: `req-${Date.now()}`,
+          type: 'request',
+          title: '🔔 New Account Request',
+          message: `${diff} new customer account opening request${diff > 1 ? 's' : ''} received. Pending review.`,
+          actionTab: 'requests',
+          actionLabel: 'Review Requests',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setAdminToasts((prev) => [newToast, ...prev.slice(0, 4)]);
+      }
+      prevPendingRequestsCountRef.current = pendingCount;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to retrieve account requests.';
       setAccountRequestsError(msg);
@@ -257,6 +288,22 @@ export const AdminPage: React.FC = () => {
       setMakerCheckerError(null);
       const data = await adminApi.getMakerCheckerRequests();
       setMakerCheckerRequests(data);
+
+      const pendingCount = data.filter((r) => r.status === 'PENDING').length;
+      if (prevPendingMakerCheckerCountRef.current !== null && pendingCount > prevPendingMakerCheckerCountRef.current) {
+        const diff = pendingCount - prevPendingMakerCheckerCountRef.current;
+        const newToast: AdminNotificationToast = {
+          id: `mc-${Date.now()}`,
+          type: 'maker-checker',
+          title: '🔔 New Maker-Checker Request',
+          message: `${diff} new high-value transaction${diff > 1 ? 's' : ''} awaiting dual-authorization review.`,
+          actionTab: 'maker-checker',
+          actionLabel: 'Review Transfers',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setAdminToasts((prev) => [newToast, ...prev.slice(0, 4)]);
+      }
+      prevPendingMakerCheckerCountRef.current = pendingCount;
     } catch (err: unknown) {
       setMakerCheckerError(err instanceof Error ? err.message : 'Failed to retrieve maker-checker requests');
     } finally {
@@ -710,6 +757,173 @@ export const AdminPage: React.FC = () => {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <PortalSwitcher />
+
+          {/* Admin Live Notification Center Bell */}
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setShowNotificationsDropdown((prev) => !prev)}
+              title="Admin Alerts & Pending Requests"
+              style={{
+                position: 'relative',
+                background: '#FFFFFF',
+                border: '1px solid #E5E7EB',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13px',
+                color: '#374151',
+                fontWeight: 500,
+                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+              }}
+            >
+              <span style={{ fontSize: '15px' }}>🔔</span>
+              <span>Alerts</span>
+              {(pendingRequestsCount + pendingMakerCheckerCount) > 0 && (
+                <span style={{
+                  backgroundColor: '#DC2626',
+                  color: '#FFFFFF',
+                  borderRadius: '9999px',
+                  padding: '2px 7px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  lineHeight: 1
+                }}>
+                  {pendingRequestsCount + pendingMakerCheckerCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown Panel */}
+            {showNotificationsDropdown && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: '8px',
+                  width: '340px',
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
+                  zIndex: 100,
+                  overflow: 'hidden'
+                }}
+              >
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid #F1F5F9',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: '#F8FAFC'
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                    Notifications & Pending Tasks
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNotificationsDropdown(false)}
+                    style={{ background: 'none', border: 'none', fontSize: '16px', color: '#94A3B8', cursor: 'pointer' }}
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                <div style={{ padding: '8px' }}>
+                  {/* Account Opening Requests Summary */}
+                  <div
+                    onClick={() => {
+                      setActiveTab('requests');
+                      setShowNotificationsDropdown(false);
+                    }}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: pendingRequestsCount > 0 ? '#FEF3C7' : '#F8FAFC',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>🏦</span>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                          Account Requests
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#64748B' }}>
+                          {pendingRequestsCount} pending customer review
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: pendingRequestsCount > 0 ? '#B45309' : '#64748B',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      backgroundColor: '#FFFFFF'
+                    }}>
+                      {pendingRequestsCount > 0 ? 'Review &rarr;' : 'View'}
+                    </span>
+                  </div>
+
+                  {/* Maker-Checker Requests Summary */}
+                  <div
+                    onClick={() => {
+                      setActiveTab('maker-checker');
+                      setShowNotificationsDropdown(false);
+                    }}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: pendingMakerCheckerCount > 0 ? '#EEF2FF' : '#F8FAFC'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>⚖️</span>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A' }}>
+                          Maker-Checker Dual Auth
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#64748B' }}>
+                          {pendingMakerCheckerCount} transfer/reversal approvals
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: pendingMakerCheckerCount > 0 ? '#4338CA' : '#64748B',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      backgroundColor: '#FFFFFF'
+                    }}>
+                      {pendingMakerCheckerCount > 0 ? 'Review &rarr;' : 'View'}
+                    </span>
+                  </div>
+
+                  {(pendingRequestsCount === 0 && pendingMakerCheckerCount === 0) && (
+                    <div style={{ textAlign: 'center', padding: '12px 8px', fontSize: '12px', color: '#15803D' }}>
+                      ✓ All pending queues are clear.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={() => setAdminOwnPasswordModalOpen(true)}
@@ -739,6 +953,91 @@ export const AdminPage: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* Real-Time Floating Admin Notification Toasts Stack */}
+      {adminToasts.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            zIndex: 10000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            maxWidth: '400px',
+            width: 'calc(100% - 48px)'
+          }}
+        >
+          {adminToasts.map((toast) => (
+            <div
+              key={toast.id}
+              role="alert"
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: '10px',
+                border: toast.type === 'maker-checker' ? '1px solid #818CF8' : '1px solid #F59E0B',
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
+                padding: '14px 16px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '16px' }}>{toast.title.startsWith('🔔') ? '🔔' : '✓'}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                    {toast.title.replace('🔔 ', '')}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#94A3B8' }}>{toast.timestamp}</span>
+                </div>
+                <p style={{ margin: '0 0 10px', fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                  {toast.message}
+                </p>
+                {toast.actionTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(toast.actionTab!);
+                      setAdminToasts((prev) => prev.filter((t) => t.id !== toast.id));
+                    }}
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: '#0D6E64',
+                      backgroundColor: '#E6F4F1',
+                      border: '1px solid #A3D9D1',
+                      borderRadius: '4px',
+                      padding: '4px 10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {toast.actionLabel || 'Review &rarr;'}
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdminToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                aria-label="Dismiss alert"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  color: '#94A3B8',
+                  cursor: 'pointer',
+                  padding: '0 4px',
+                  lineHeight: 1
+                }}
+              >
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Main Container */}
       <main style={{ flex: 1, padding: '24px', maxWidth: '1200px', width: '100%', margin: '0 auto' }}>
