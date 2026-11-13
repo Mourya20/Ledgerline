@@ -115,7 +115,7 @@ export const SignInPage: React.FC = () => {
           </span>
           Vaultora
         </Link>
-        <ThemeToggle variant="pill" />
+        <ThemeToggle variant="switch" />
       </header>
 
       {/* Main Home Responsive Layout */}
@@ -133,9 +133,10 @@ export const SignInPage: React.FC = () => {
           <div style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '6px',
-            backgroundColor: '#E6F4F1',
-            color: '#0D6E64',
+            gap: '7px',
+            backgroundColor: 'var(--primary-teal-light)',
+            color: 'var(--primary-teal)',
+            border: '1px solid var(--primary-teal-border)',
             padding: '4px 12px',
             borderRadius: '9999px',
             fontSize: '12px',
@@ -143,7 +144,9 @@ export const SignInPage: React.FC = () => {
             marginBottom: '16px',
             letterSpacing: '0.02em'
           }}>
-            <span>🛡️</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
             <span>Secure Banking & Transaction Platform</span>
           </div>
 
@@ -170,18 +173,24 @@ export const SignInPage: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '28px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
               <div style={{
-                width: '34px',
-                height: '34px',
+                width: '36px',
+                height: '36px',
                 borderRadius: '8px',
                 backgroundColor: 'var(--primary-teal-light)',
                 color: 'var(--primary-teal)',
+                border: '1px solid var(--primary-teal-border)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '16px',
                 flexShrink: 0
               }}>
-                ⚖️
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/>
+                  <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/>
+                  <path d="M7 21h10"/>
+                  <path d="M12 3v18"/>
+                  <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>
+                </svg>
               </div>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Mathematical Zero-Sum Balance</div>
@@ -191,18 +200,21 @@ export const SignInPage: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
               <div style={{
-                width: '34px',
-                height: '34px',
+                width: '36px',
+                height: '36px',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
                 color: '#3B82F6',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '16px',
                 flexShrink: 0
               }}>
-                🔒
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
               </div>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Maker-Checker Dual Governance</div>
@@ -212,18 +224,22 @@ export const SignInPage: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
               <div style={{
-                width: '34px',
-                height: '34px',
+                width: '36px',
+                height: '36px',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                backgroundColor: 'rgba(168, 85, 247, 0.12)',
                 color: '#A855F7',
+                border: '1px solid rgba(168, 85, 247, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '16px',
                 flexShrink: 0
               }}>
-                📋
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <path d="m9 15 2 2 4-4"/>
+                </svg>
               </div>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>Auditor Portal & Invariant Proof</div>

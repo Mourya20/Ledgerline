@@ -94,7 +94,7 @@ export const RegisterPage: React.FC = () => {
         >
           Vaultora
         </Link>
-        <ThemeToggle variant="pill" />
+        <ThemeToggle variant="switch" />
       </header>
 
       <div className="card" style={{ width: '100%', maxWidth: '380px', padding: '32px' }}>

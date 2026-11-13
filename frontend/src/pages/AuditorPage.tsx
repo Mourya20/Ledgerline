@@ -257,7 +257,7 @@ export const AuditorPage: React.FC = () => {
               {user.email}
             </span>
           )}
-          <ThemeToggle variant="pill" />
+          <ThemeToggle variant="switch" />
           <button
             type="button"
             onClick={handleLogout}

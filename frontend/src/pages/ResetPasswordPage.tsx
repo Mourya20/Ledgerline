@@ -70,7 +70,7 @@ export const ResetPasswordPage: React.FC = () => {
         <Link to="/" style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-main)', textDecoration: 'none', letterSpacing: '-0.02em' }}>
           Vaultora
         </Link>
-        <ThemeToggle variant="pill" />
+        <ThemeToggle variant="switch" />
       </header>
 
       <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px' }}>

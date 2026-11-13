@@ -5,12 +5,16 @@ import { ThemeProvider, useTheme } from './ThemeContext';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 const ThemeTester: React.FC = () => {
-  const { theme, toggleTheme } = useTheme();
+  const { mode, theme, toggleTheme, setMode } = useTheme();
   return (
     <div>
+      <span data-testid="current-mode">{mode}</span>
       <span data-testid="current-theme">{theme}</span>
       <button onClick={toggleTheme}>Toggle</button>
-      <ThemeToggle variant="pill" />
+      <button onClick={() => setMode('dark')}>SetDark</button>
+      <button onClick={() => setMode('system')}>SetSystem</button>
+      <ThemeToggle variant="switch" />
+      <ThemeToggle variant="segmented" />
     </div>
   );
 };
@@ -26,15 +30,15 @@ describe('ThemeContext and ThemeToggle', () => {
     cleanup();
   });
 
-  it('defaults to light theme when no preference stored', () => {
+  it('defaults to system mode on first load', () => {
     render(
       <ThemeProvider>
         <ThemeTester />
       </ThemeProvider>
     );
 
-    expect(screen.getByTestId('current-theme').textContent).toBe('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(screen.getByTestId('current-mode').textContent).toBe('system');
+    expect(document.documentElement.getAttribute('data-theme')).toBeTruthy();
   });
 
   it('toggles between light and dark theme on click', () => {
@@ -47,18 +51,34 @@ describe('ThemeContext and ThemeToggle', () => {
     const toggleButton = screen.getByText('Toggle');
     fireEvent.click(toggleButton);
 
-    expect(screen.getByTestId('current-theme').textContent).toBe('dark');
+    const themeAfterOneClick = screen.getByTestId('current-theme').textContent;
+    expect(themeAfterOneClick).toBe('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('vaultora_theme')).toBe('dark');
 
     fireEvent.click(toggleButton);
     expect(screen.getByTestId('current-theme').textContent).toBe('light');
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    expect(localStorage.getItem('vaultora_theme')).toBe('light');
   });
 
-  it('restores stored theme from localStorage on load', () => {
-    localStorage.setItem('vaultora_theme', 'dark');
+  it('allows explicit mode setting (system, dark, light)', () => {
+    render(
+      <ThemeProvider>
+        <ThemeTester />
+      </ThemeProvider>
+    );
+
+    fireEvent.click(screen.getByText('SetDark'));
+    expect(screen.getByTestId('current-mode').textContent).toBe('dark');
+    expect(screen.getByTestId('current-theme').textContent).toBe('dark');
+    expect(localStorage.getItem('vaultora_theme_mode')).toBe('dark');
+
+    fireEvent.click(screen.getByText('SetSystem'));
+    expect(screen.getByTestId('current-mode').textContent).toBe('system');
+    expect(localStorage.getItem('vaultora_theme_mode')).toBe('system');
+  });
+
+  it('restores stored mode from localStorage on load', () => {
+    localStorage.setItem('vaultora_theme_mode', 'dark');
 
     render(
       <ThemeProvider>
@@ -66,6 +86,7 @@ describe('ThemeContext and ThemeToggle', () => {
       </ThemeProvider>
     );
 
+    expect(screen.getByTestId('current-mode').textContent).toBe('dark');
     expect(screen.getByTestId('current-theme').textContent).toBe('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
