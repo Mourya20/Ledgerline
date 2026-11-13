@@ -50,25 +50,6 @@ export const MoonIcon: React.FC<{ size?: number; className?: string }> = ({ size
   </svg>
 );
 
-export const MonitorIcon: React.FC<{ size?: number; className?: string }> = ({ size = 14, className = '' }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    style={{ display: 'inline-block', verticalAlign: 'middle' }}
-  >
-    <rect width="20" height="14" x="2" y="3" rx="2" />
-    <line x1="8" x2="16" y1="21" y2="21" />
-    <line x1="12" x2="12" y1="17" y2="21" />
-  </svg>
-);
-
 export const ThemeToggle: React.FC<ThemeToggleProps> = ({
   variant = 'switch',
   className = '',
@@ -85,7 +66,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
         onClick={toggleTheme}
         className={`theme-toggle-symbol-btn ${className}`}
         aria-label={`Current: ${isDark ? 'Dark' : 'Light'}. Click to toggle theme.`}
-        title={`Theme: ${mode === 'system' ? 'System (' + theme + ')' : theme}. Click to toggle.`}
+        title={`Theme: ${theme}. Click to toggle.`}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -107,11 +88,10 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
     );
   }
 
-  // 2. Three-Option Segmented Control (System / Light / Dark)
+  // 2. Two-Option Segmented Control (Light / Dark)
   if (variant === 'segmented') {
     const options: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
       { id: 'light', label: 'Light', icon: <SunIcon size={13} /> },
-      { id: 'system', label: 'Auto', icon: <MonitorIcon size={13} /> },
       { id: 'dark', label: 'Dark', icon: <MoonIcon size={13} /> },
     ];
 
@@ -187,22 +167,6 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
             {isDark ? <MoonIcon size={14} /> : <SunIcon size={14} />}
           </span>
           <span style={{ fontSize: '13px', color: 'var(--text-main)' }}>Theme</span>
-          {mode === 'system' && (
-            <span
-              style={{
-                fontSize: '10px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                padding: '1px 5px',
-                borderRadius: '4px',
-                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#F1F5F9',
-                color: 'var(--text-muted)',
-              }}
-            >
-              Auto
-            </span>
-          )}
         </div>
 
         {/* Minimalist Switch Toggle */}
@@ -268,7 +232,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
         role="switch"
         aria-checked={isDark}
         aria-label={`Toggle theme (currently ${theme})`}
-        title={`Current: ${mode === 'system' ? 'System default (' + theme + ')' : theme}. Click to toggle.`}
+        title={`Current: ${theme}. Click to toggle.`}
         style={{
           position: 'relative',
           width: '46px',
@@ -305,20 +269,6 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
         </span>
       </button>
 
-      {/* Subtle indicator showing if on System preference */}
-      {mode === 'system' && (
-        <span
-          style={{
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            fontWeight: 500,
-            userSelect: 'none',
-          }}
-          title="Following system appearance"
-        >
-          Auto
-        </span>
-      )}
     </div>
   );
 };
